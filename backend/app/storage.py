@@ -91,8 +91,12 @@ class GcsObjectStore:
 
     def put(self, key: str, fileobj: BinaryIO, content_type: str | None = None) -> int:
         blob = self._bucket.blob(key)
-        # upload_from_file streams from the file handle in resumable chunks;
-        # it does not read the whole upload into memory first.
+                # Send the file in 8 MiB pieces so at most 8 MiB of it is in memory at a
+        # time. The library's default piece is 100 MiB, larger than any file we
+        # accept, so without this every upload was read into memory whole. On
+        # Cloud Run that doubles up: FastAPI has already saved the upload to /tmp,
+        # and /tmp there is RAM. Must be a multiple of 256 KiB.
+        blob.chunk_size = 8 * 1024 * 1024
         blob.upload_from_file(fileobj, content_type=content_type, rewind=True)
         blob.reload()
         return int(blob.size or 0)
