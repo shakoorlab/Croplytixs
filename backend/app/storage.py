@@ -91,7 +91,7 @@ class GcsObjectStore:
 
     def put(self, key: str, fileobj: BinaryIO, content_type: str | None = None) -> int:
         blob = self._bucket.blob(key)
-                # Send the file in 8 MiB pieces so at most 8 MiB of it is in memory at a
+        # Send the file in 8 MiB pieces so at most 8 MiB of it is in memory at a
         # time. The library's default piece is 100 MiB, larger than any file we
         # accept, so without this every upload was read into memory whole. On
         # Cloud Run that doubles up: FastAPI has already saved the upload to /tmp,

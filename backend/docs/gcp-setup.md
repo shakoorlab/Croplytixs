@@ -176,7 +176,7 @@ gcloud run deploy croplytix-api \
   --cpu 1 \
   --min-instances 0 \
   --max-instances 2 \
-  --concurrency 20 \
+  --concurrency 10 \
   --timeout 300
 ```
 
@@ -206,9 +206,12 @@ minutes the first time; later builds reuse the dependency layer and are faster.
   `curl` to `/api/health` a minute before you present.
 - `--max-instances 2` — a ceiling. If something loops or a script hammers the API,
   it cannot fan out to hundreds of containers and burn the credit.
-- `--concurrency 20` — requests per container before it scales out. The handlers
-  are synchronous (they block on Google's client libraries) and FastAPI runs them
-  in a thread pool; 20 is comfortable.
+- `--concurrency 10` — requests per container before Cloud Run starts another.
+  Memory sets this ceiling, not CPU: an upload in flight holds its whole request
+  (up to 32 MiB) in `/tmp`, which is RAM on Cloud Run, plus the 8 MiB send buffer
+  from `GcsObjectStore.put` — about 40 MiB each. Ten of those plus the ~90 MiB idle
+  process is ~490 MiB, just under 512Mi. At 20, a burst of large uploads could push
+  the container past its memory limit and Cloud Run would kill it mid-request.
 - `--timeout 300` — five minutes per request, plenty for a 30 MB upload on a slow
   link.
 
