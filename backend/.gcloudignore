@@ -1,0 +1,12 @@
+# What `gcloud run deploy --source .` uploads to Cloud Build. Same idea as
+# .dockerignore, but this one governs the upload, that one governs the image.
+.env
+.env.*
+!.env.example
+.data/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.git/

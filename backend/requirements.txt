@@ -1,0 +1,9 @@
+# Runtime dependencies. Pinned exactly so a Cloud Build today and a Cloud Build
+# in three months produce the same image. Bump deliberately, not by accident.
+fastapi==0.141.1
+uvicorn[standard]==0.46.0
+pydantic==2.13.3
+pydantic-settings==2.14.0
+python-multipart==0.0.26          # FastAPI needs this to parse multipart/form-data uploads
+google-cloud-storage==3.14.1
+google-cloud-firestore==2.30.0

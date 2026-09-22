@@ -1,0 +1,57 @@
+# Rendered into /etc/nginx/conf.d/default.conf by the nginx image's entrypoint,
+# which substitutes ${VARIABLES} that exist in the container's environment.
+# nginx's own $variables ($uri, $host...) are left alone because no env var has
+# those names.
+#
+#   PORT      - Cloud Run injects 8080; the Dockerfile sets the same default.
+#   API_HOST  - hostname of the backend service, e.g. croplytix-api-xxxx-uc.a.run.app
+#               (no scheme, no path).
+
+server {
+    listen ${PORT};
+    server_name _;
+    server_tokens off;
+    root /usr/share/nginx/html;
+    index index.html;
+
+    gzip on;
+    gzip_types text/plain text/css text/javascript application/javascript application/json image/svg+xml;
+    gzip_min_length 1024;
+
+    # ---- API: same origin for the browser, proxied to Cloud Run over TLS ----
+    # The browser only ever talks to this host, so there is no CORS and the API
+    # address is a deploy-time setting rather than something baked into the JS.
+    location /api/ {
+        proxy_pass https://${API_HOST};
+        # Google's front end routes by hostname, so both the TLS handshake (SNI)
+        # and the Host header must carry the backend's name, not ours.
+        proxy_ssl_server_name on;
+        proxy_set_header Host ${API_HOST};
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Uploads: Cloud Run caps an HTTP/1 request at 32 MiB, on this hop and the
+        # next. Reject early with a clear 413 rather than a gateway error later.
+        client_max_body_size 32m;
+        proxy_request_buffering off;   # stream the upload through instead of spooling it to disk first
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+
+    # hashed filenames — safe to cache forever
+    location ~* \.(js|css|woff2?|png|jpe?g|gif|svg|webp|ico)$ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+
+    # index.html must NOT be cached, or browsers keep pointing at deleted bundles
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
