@@ -133,8 +133,39 @@ class GoogleTokenVerifier:
         Nothing from `jwt` may escape this method: translate its exceptions into
         the three above.
         """
-        # TODO(Jake): step 2a
-        raise NotImplementedError("app/auth.py: GoogleTokenVerifier.verify")
+        try:
+            key = self._keys.get_signing_key_from_jwt(token).key
+            claims = jwt.decode(
+                token,
+                key,
+                algorithms=["RS256"],  # pinned: never trust the token's own `alg`
+                audience=self.project_id,
+                issuer=self.issuer,
+                leeway=CLOCK_SKEW_SECONDS,
+                options={"require": REQUIRED_CLAIMS},
+            )
+        # Most specific first: both of these are PyJWTError subclasses, so the
+        # catch-all below would otherwise swallow them as "invalid".
+        except jwt.exceptions.PyJWKClientConnectionError as e:
+            raise VerifierUnavailable("could not fetch Google's signing keys") from e
+        except jwt.exceptions.ExpiredSignatureError as e:
+            raise TokenExpired("token has expired") from e
+        except jwt.exceptions.PyJWTError as e:
+            # Bad signature, unknown kid, wrong aud/iss, iat in the future, missing
+            # claim, alg "none" or HS256, not a JWT at all.
+            raise TokenInvalid(str(e)) from e
+
+        # What PyJWT doesn't check: `require` only proves a claim exists, and it
+        # has no idea what `auth_time` means.
+        sub = claims["sub"]
+        if not isinstance(sub, str) or not sub:
+            raise TokenInvalid("sub must be a non-empty string")
+        auth_time = claims["auth_time"]
+        if isinstance(auth_time, bool) or not isinstance(auth_time, (int, float)):
+            raise TokenInvalid("auth_time must be a number")
+        if auth_time > time.time() + CLOCK_SKEW_SECONDS:
+            raise TokenInvalid("auth_time is in the future")
+        return claims
 
 
 @lru_cache(maxsize=1)
@@ -164,5 +195,26 @@ def current_user(
     Refuse with an HTTPException (401 or 503, see the module docstring), or
     return the User the token names. The user id is the `sub` claim.
     """
-    # TODO(Jake): step 2b
-    raise NotImplementedError("app/auth.py: current_user")
+    if credentials is None:
+        raise _unauthorized("Sign in to continue.")
+    try:
+        claims = verifier.verify(credentials.credentials)
+    except TokenExpired:
+        raise _unauthorized("Your sign-in has expired. Sign in again.") from None
+    except TokenInvalid as e:
+        # The reason goes to the log, never to the caller: a forger learns nothing.
+        log.info("rejected ID token: %s", e)
+        raise _unauthorized("Sign in to continue.") from None
+    except VerifierUnavailable as e:
+        log.warning("cannot verify ID tokens: %s", e.__cause__ or e)
+        raise HTTPException(
+            status_code=503,
+            detail="Sign-in can't be checked right now. Try again in a moment.",
+            headers={"Retry-After": "5"},
+        ) from None
+    return User(uid=claims["sub"], email=claims.get("email"))
+
+
+def _unauthorized(detail: str) -> HTTPException:
+    """A 401 that says how to authenticate (RFC 6750), not just that it failed."""
+    return HTTPException(status_code=401, detail=detail, headers={"WWW-Authenticate": "Bearer"})
