@@ -21,7 +21,13 @@ server {
     # ---- API: same origin for the browser, proxied to Cloud Run over TLS ----
     # The browser only ever talks to this host, so there is no CORS and the API
     # address is a deploy-time setting rather than something baked into the JS.
-    location /api/ {
+    #
+    # `^~` = "if this prefix matches, stop looking". nginx picks the longest
+    # prefix match first but then still tries every regex location below, and
+    # the first regex that matches wins. Without `^~`, an API URL ending in
+    # .png/.jpg/.svg/... (a file served by the flights route) was answered by the
+    # static-file rule from local disk (404) and never reached the API.
+    location ^~ /api/ {
         proxy_pass https://${API_HOST};
         # Google's front end routes by hostname, so both the TLS handshake (SNI)
         # and the Host header must carry the backend's name, not ours.
@@ -46,11 +52,22 @@ server {
         try_files $uri =404;
     }
 
+    # Any other path that looks like a file (ends in .something) must exist.
+    # Without this rule a missing .json/.csv/.txt fell through to the SPA
+    # fallback below and came back as index.html with status 200: fetch()
+    # counted that as success and response.json() failed on the "<" of
+    # "<!doctype html>" ("Unexpected token '<'"). A 404 names the real problem.
+    location ~ \.[A-Za-z0-9]+$ {
+        try_files $uri =404;
+    }
+
     # index.html must NOT be cached, or browsers keep pointing at deleted bundles
     location = /index.html {
         add_header Cache-Control "no-cache";
     }
 
+    # SPA fallback: page routes like /trials/x/review exist only in React Router,
+    # so any extension-less path that isn't a real file gets the app shell.
     location / {
         try_files $uri $uri/ /index.html;
     }

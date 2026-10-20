@@ -13,7 +13,7 @@ Estimated time: 30–40 minutes, most of it waiting for the first Cloud Build.
 
 ```bash
 gcloud auth list                 # the account with the * is the one gcloud acts as
-gcloud config get project        # this must print the free-trial project id
+gcloud config get project        # this must print the Croplytix project id (not-croplytixs)
 ```
 
 Then pin the values every later command uses. Paste these into the same terminal
@@ -25,7 +25,8 @@ export REGION=us-central1
 export BUCKET=croplytix-${PROJECT_ID}-uploads
 export SA=croplytix-api
 export SA_EMAIL=${SA}@${PROJECT_ID}.iam.gserviceaccount.com
-echo $PROJECT_ID $REGION $BUCKET $SA_EMAIL
+export WEB_SA_EMAIL=croplytix-web@${PROJECT_ID}.iam.gserviceaccount.com
+echo $PROJECT_ID $REGION $BUCKET $SA_EMAIL $WEB_SA_EMAIL
 ```
 
 *Why the project id is inside the bucket name:* bucket names are global across every
@@ -205,7 +206,7 @@ minutes the first time; later builds reuse the dependency layer and are faster.
   first request after idle. If that would look bad in the demo, warm it up with a
   `curl` to `/api/health` a minute before you present.
 - `--max-instances 2` — a ceiling. If something loops or a script hammers the API,
-  it cannot fan out to hundreds of containers and burn the credit.
+  it cannot fan out to hundreds of containers and run up the bill.
 - `--concurrency 10` — requests per container before Cloud Run starts another.
   Memory sets this ceiling, not CPU: an upload in flight holds its whole request
   (up to 32 MiB) in `/tmp`, which is RAM on Cloud Run, plus the 8 MiB send buffer
@@ -293,9 +294,15 @@ From the `frontend/` directory:
 export API_HOST=${API_URL#https://}     # strips the scheme: croplytix-api-....run.app
 echo $API_HOST
 
+# Its own identity, holding no roles at all (why: see below).
+gcloud iam service-accounts create croplytix-web \
+  --display-name="Croplytix web (Cloud Run)" \
+  --description="Runs the nginx frontend. Holds no roles on purpose: it calls no Google API."
+
 gcloud run deploy croplytix-web \
   --source . \
   --region $REGION \
+  --service-account $WEB_SA_EMAIL \
   --allow-unauthenticated \
   --set-env-vars API_HOST=$API_HOST \
   --port 8080 \
@@ -326,32 +333,84 @@ And the browser only ever sees one hostname, which is what users and TLS expect.
 The cost is one extra hop (nginx → API) inside Google's network, a few
 milliseconds.
 
-*Why the frontend runs as the default service account:* it never touches a Google
-API — it serves static files and forwards HTTP. Nothing to scope.
+*Why the frontend gets its own service account with no roles:* it never calls a
+Google API — it serves files and forwards HTTP — so the right amount of access is
+none. Leaving it on the default is not "none": code in any Cloud Run container can
+ask the metadata server for an access token for the identity it runs as, and the
+Compute Engine default account usually holds **Editor** on the project. That would
+make the public-facing nginx container both the most exposed thing in the project
+and the holder of its broadest key. A zero-role account's tokens open nothing, and
+nothing here needs one: Cloud Run collects stdout/stderr logs itself, Cloud Run's
+own service agent pulls the image, and the `/api` proxy is plain HTTPS to a public
+URL. Why not take Editor away from the default account instead? Cloud Build runs
+as that account (step 6) and needs it to build.
+
+Check it — the first command should print `croplytix-web@…`, the second nothing:
+
+```bash
+gcloud run services describe croplytix-web --region $REGION \
+  --format='value(spec.template.spec.serviceAccountName)'
+gcloud projects get-iam-policy $PROJECT_ID --flatten="bindings[].members" \
+  --filter="bindings.members:$WEB_SA_EMAIL" --format="value(bindings.role)"
+```
+
+Later `gcloud run deploy` runs keep the account (and `API_HOST`) unless you pass a
+different value; the flag above is for a first deploy.
 
 *Fallback if Cloud Run misbehaves during the demo:* the same image runs on the
 free-tier VM with `docker run -p 80:8080 -e API_HOST=$API_HOST <image>`, since
 nothing about it is Cloud Run-specific.
 
-## 9. Two guardrails worth two minutes
+## 9. A budget alert — it now watches real money
 
-A budget alert, so the credit can't silently drain:
+The free trial on this project ended in September 2026 and the billing account is
+pay-as-you-go: the Always Free limits still apply, and anything above them bills
+the card. A budget emails you before a surprise does:
 
 ```bash
 gcloud services enable billingbudgets.googleapis.com
-gcloud billing accounts list          # copy the ACCOUNT_ID
+BA=$(gcloud billing projects describe $PROJECT_ID --format='value(billingAccountName)')
+export BILLING_ACCOUNT=${BA#billingAccounts/}
+
 gcloud billing budgets create \
-  --billing-account=ACCOUNT_ID \
-  --display-name="Croplytix guardrail" \
-  --budget-amount=50USD \
+  --billing-account=$BILLING_ACCOUNT \
+  --billing-project=$PROJECT_ID \
+  --display-name="Croplytix monthly" \
+  --budget-amount=25USD \
+  --calendar-period=month \
+  --filter-projects=projects/$PROJECT_ID \
   --threshold-rule=percent=0.5 \
-  --threshold-rule=percent=0.9
+  --threshold-rule=percent=0.9 \
+  --threshold-rule=percent=1.0 \
+  --threshold-rule=percent=1.0,basis=forecasted-spend
 ```
 
-And a note in your calendar for **day 85 of the trial**: at day 90 the $300 expires
-and, unless you upgrade the billing account, *every resource in the project is
-stopped*. Upgrading doesn't cost anything by itself — the Always Free limits keep
-applying — it just means overage would bill your card instead of the credit.
+*Why each piece:*
+
+- A budget **alerts; it stops nothing.** The emails go to the billing account's
+  administrators and users. The only hard ceilings in this setup are
+  `--max-instances 2` on each service and scale-to-zero; storage and Firestore
+  have none.
+- `--filter-projects` — count this project's spend only, even if the billing
+  account later pays for other projects too.
+- The `forecasted-spend` rule fires when the month is *trending* past $25, before
+  it gets there. Billing data lags usage by hours, so every email arrives after
+  the spend it reports.
+- `--billing-project` is not about money: it names the project whose API quota the
+  call uses. The Budget API refuses a personal `gcloud auth login` without one
+  ("end user credentials ... not supported by billingbudgets.googleapis.com").
+
+Check it:
+
+```bash
+gcloud billing budgets list --billing-account=$BILLING_ACCOUNT --billing-project=$PROJECT_ID
+```
+
+A hard stop also exists: a **spend cap budget** (Preview, set up in the Console)
+can pause Cloud Run in one project once that service's cost crosses a limit. Data
+is untouched and the service stays paused until you lift the cap. One option while
+the API still has no login:
+https://docs.cloud.google.com/billing/docs/how-to/budgets-spend-caps
 
 ---
 
@@ -385,6 +444,6 @@ override the adapters.
 At demo scale everything above sits inside Always Free: a few hundred Firestore
 ops a day against 50k/20k, a few hundred MB in the bucket against 5 GB, a few
 hundred requests against 2 million, one ~150 MB image against 0.5 GB in Artifact
-Registry. The one thing that *will* consume credit if you leave it on is
+Registry. The one thing that *will* cost money if you leave it on is
 `--min-instances 1` (keeps a container warm, ~$8–10/month at 512Mi). Everything
 here scales to zero.
