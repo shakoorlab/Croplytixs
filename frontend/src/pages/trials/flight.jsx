@@ -31,6 +31,7 @@ import QcChip from 'sections/trials/QcChip';
 import { NESTED_PANEL, NESTED_PANEL_FRAMED } from 'sections/trials/surfaces';
 import { formatBytes } from 'sections/trials/flight-setup/utils';
 import { useFlightResults } from 'api/results';
+import { apiDownload } from 'api/client';
 import { MODELS } from 'api/models';
 import LifecycleChip from 'sections/models/LifecycleChip';
 import formatRelative from 'utils/formatRelative';
@@ -88,6 +89,7 @@ export default function FlightDetail() {
 
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [downloadError, setDownloadError] = useState(null);
 
   const plots = flight?.results?.plots || NONE;
   const summary = flight?.results?.summary;
@@ -288,16 +290,27 @@ export default function FlightDetail() {
                         {flight.files.map((file) => (
                           <Link
                             key={file.key}
-                            href={`/api/trials/${trialId}/flights/${flightId}/files/${file.role}/${encodeURIComponent(file.name)}`}
-                            target="_blank"
-                            rel="noreferrer"
+                            component="button"
+                            type="button"
+                            onClick={() => {
+                              setDownloadError(null);
+                              apiDownload(
+                                `/api/trials/${trialId}/flights/${flightId}/files/${file.role}/${encodeURIComponent(file.name)}`,
+                                file.name
+                              ).catch((error) => setDownloadError(`Couldn’t download ${file.name}: ${error.message}`));
+                            }}
                             variant="caption"
                             underline="hover"
-                            sx={{ ...mono, wordBreak: 'break-all' }}
+                            sx={{ ...mono, wordBreak: 'break-all', textAlign: 'left' }}
                           >
                             {file.role}/{file.name} · {formatBytes(file.bytes)}
                           </Link>
                         ))}
+                        {downloadError && (
+                          <Typography variant="caption" color="error" role="alert">
+                            {downloadError}
+                          </Typography>
+                        )}
                       </Stack>
                     </Row>
                   )}

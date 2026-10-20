@@ -20,6 +20,7 @@
     "@mui/system": "7.3.6",
     "@mui/x-charts": "8.22.1",
     "@vitejs/plugin-react": "5.1.2",
+    "firebase": "12.19.0",
     "geotiff": "3.0.5",
     "lodash-es": "4.17.22",
     "proj4": "2.21.0",

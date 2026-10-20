@@ -31,7 +31,12 @@ const MESSAGES = {
   'auth/invalid-credential': 'That email and password don’t match an account. Check both and try again.',
   'auth/user-disabled': 'This account has been turned off. Ask your project admin to restore it.',
   'auth/too-many-requests': 'Too many attempts. Wait a minute, then try again.',
-  'auth/network-request-failed': 'Couldn’t reach the sign-in service. Check your connection and try again.'
+  'auth/network-request-failed': 'Couldn’t reach the sign-in service. Check your connection and try again.',
+  // Older projects without email-enumeration protection report these instead of invalid-credential.
+  'auth/user-not-found': 'That email and password don’t match an account. Check both and try again.',
+  'auth/wrong-password': 'That email and password don’t match an account. Check both and try again.',
+  'auth/invalid-email': 'Enter an email address like name@institute.org.',
+  'auth/not-configured': 'Sign-in isn’t set up for this site yet. Let your project admin know.'
 };
 
 function validate({ email, password }) {

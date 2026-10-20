@@ -11,14 +11,35 @@ import { expireSession, getIdToken } from './auth';
  * the Cloud Run service (see nginx.conf.template). The page never learns the
  * API's real address, so one build runs anywhere and CORS never enters the picture.
  *
- * It is also where the session meets the API: every request carries the ID token from
- * api/auth.js (none in the preview, so no header), and a 401 ends the session so the
- * route guard can send the user to sign in again and back to the page they were on.
+ * It is also where the session meets the API: every request carries the Identity
+ * Platform ID token from api/auth.js, and a 401 that survives one fresh-token retry ends
+ * the session so the route guard can send the user to sign in again and back to the
+ * page they were on.
  */
 
-async function authHeader() {
-  const token = await getIdToken();
+async function authHeader(forceRefresh = false) {
+  const token = await getIdToken(forceRefresh);
   return token ? { authorization: `Bearer ${token}` } : {};
+}
+
+async function send(path, buildInit, forceRefresh) {
+  try {
+    return await fetch(path, buildInit(await authHeader(forceRefresh)));
+  } catch {
+    throw new ApiError(0, 'Could not reach the API — is the backend running?');
+  }
+}
+
+/**
+ * fetch with the session's token. A 401 gets exactly one retry with a freshly minted
+ * token, which covers a token that expired in flight or a clock running fast; a second
+ * 401 means the API really refuses this session, so it ends.
+ */
+async function fetchWithToken(path, buildInit) {
+  let response = await send(path, buildInit, false);
+  if (response.status === 401 && (await getIdToken())) response = await send(path, buildInit, true);
+  if (response.status === 401) expireSession();
+  return response;
 }
 
 export class ApiError extends Error {
@@ -48,23 +69,38 @@ function parseBody(text) {
 }
 
 export async function apiFetch(path, { method = 'GET', json, headers, ...rest } = {}) {
-  const init = {
+  const buildInit = (auth) => ({
     method,
-    headers: { ...(json !== undefined && { 'content-type': 'application/json' }), ...(await authHeader()), ...headers },
+    headers: { ...(json !== undefined && { 'content-type': 'application/json' }), ...auth, ...headers },
+    ...(json !== undefined && { body: JSON.stringify(json) }),
     ...rest
-  };
-  if (json !== undefined) init.body = JSON.stringify(json);
-
-  let response;
-  try {
-    response = await fetch(path, init);
-  } catch {
-    throw new ApiError(0, 'Could not reach the API — is the backend running?');
-  }
+  });
+  const response = await fetchWithToken(path, buildInit);
   const body = parseBody(await response.text());
-  if (response.status === 401) expireSession();
   if (!response.ok) throw new ApiError(response.status, detailOf(body) || `HTTP ${response.status}`, body);
   return body;
+}
+
+/**
+ * Save a stored file. A plain link can't carry the Authorization header, so the file is
+ * fetched with the token and handed to the browser as a download. It passes through
+ * memory, which is fine for today's ≤ 30 MB inputs; multi-GB orthos will get short-lived
+ * download URLs from the API instead.
+ */
+export async function apiDownload(path, filename) {
+  const response = await fetchWithToken(path, (auth) => ({ headers: auth }));
+  if (!response.ok) {
+    const body = parseBody(await response.text());
+    throw new ApiError(response.status, detailOf(body) || `HTTP ${response.status}`, body);
+  }
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 /** For `useSWR(key, fetcher)` — the key is the path. */
