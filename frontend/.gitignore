@@ -108,3 +108,4 @@ dist
 
 # wincompare file
 .bak
+.env.local
