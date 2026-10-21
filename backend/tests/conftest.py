@@ -18,14 +18,20 @@ import os
 os.environ["STORAGE_BACKEND"] = "local"
 os.environ["DB_BACKEND"] = "memory"
 os.environ["MAX_UPLOAD_MB"] = "1"  # small so the 413 path is cheap to exercise
+os.environ["AUTH_PROJECT_ID"] = "test-project"  # the start-up check needs one; never used to fetch keys
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import deps  # noqa: E402
+from app import auth, deps  # noqa: E402
 from app.db import MemoryRepo  # noqa: E402
 from app.main import app  # noqa: E402
 from app.storage import LocalObjectStore  # noqa: E402
+from tests.tokens import PROJECT, FakeKeySource  # noqa: E402
+
+# Route tests are about trials and flights, not sign-in: their requests arrive
+# already signed in as this user. tests/test_auth.py covers the real thing.
+TEST_USER = auth.User(uid="uid-test", email="test@example.com")
 
 
 @pytest.fixture
@@ -39,9 +45,30 @@ def store(tmp_path) -> LocalObjectStore:
 
 
 @pytest.fixture
-def client(repo, store) -> TestClient:
+def keys() -> FakeKeySource:
+    return FakeKeySource()
+
+
+@pytest.fixture
+def client(repo, store, keys) -> TestClient:
     app.dependency_overrides[deps.get_repo] = lambda: repo
     app.dependency_overrides[deps.get_store] = lambda: store
+    app.dependency_overrides[auth.current_user] = lambda: TEST_USER
+    app.dependency_overrides[auth.get_verifier] = lambda: auth.GoogleTokenVerifier(PROJECT, keys=keys)
+    deps.get_repo.cache_clear()
+    deps.get_store.cache_clear()
+    with TestClient(app) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def browser(repo, store, keys) -> TestClient:
+    """A client with no sign-in shortcut: current_user runs for real, against
+    tokens from tests/tokens.py."""
+    app.dependency_overrides[deps.get_repo] = lambda: repo
+    app.dependency_overrides[deps.get_store] = lambda: store
+    app.dependency_overrides[auth.get_verifier] = lambda: auth.GoogleTokenVerifier(PROJECT, keys=keys)
     deps.get_repo.cache_clear()
     deps.get_store.cache_clear()
     with TestClient(app) as c:

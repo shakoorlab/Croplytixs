@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     # one `gcloud firestore databases create` makes unless you name it.
     FIRESTORE_DATABASE: str = "(default)"
 
+    # ---- sign-in ----------------------------------------------------------------
+    # Which project's Identity Platform sign-ins to trust. An ID token names the
+    # project it was minted for (its `aud` claim); tokens for any other project
+    # are refused. Falls back to GCP_PROJECT. The API refuses to start with
+    # neither set — failing at deploy beats failing on the first request.
+    AUTH_PROJECT_ID: str | None = None
+
     # ---- local adapter ----------------------------------------------------------
     LOCAL_STORAGE_DIR: str = "./.data/objects"
 

@@ -7,3 +7,4 @@ pydantic-settings==2.14.0
 python-multipart==0.0.26          # FastAPI needs this to parse multipart/form-data uploads
 google-cloud-storage==3.14.1
 google-cloud-firestore==2.30.0
+PyJWT[crypto]==2.15.1             # checks Identity Platform ID tokens (app/auth.py)
