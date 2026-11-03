@@ -54,6 +54,20 @@ class Settings(BaseSettings):
     # upload design (direct-to-bucket signed URLs), not a bigger number here.
     MAX_UPLOAD_MB: int = 30
 
+    # ---- ingest (orthophoto → COGs, see app/ingest.py) ------------------------
+    # Where ingest runs when a flight is uploaded:
+    #   inline   — in this process, after the response is sent. Local runs.
+    #   cloudrun — as an execution of the Cloud Run job INGEST_JOB, so GDAL never
+    #              shares the API's 512 MiB. Cloud Run.
+    #   off      — record the flight as queued and leave it there. Tests.
+    INGEST_RUNNER: Literal["inline", "cloudrun", "off"] = "inline"
+    INGEST_JOB: str = "croplytix-ingest"
+    INGEST_REGION: str | None = None  # the job's region, e.g. us-central1; required for cloudrun
+    # The viewing copy's compression. Both decode in every current browser;
+    # WebP is ~15% smaller on the sample ortho, JPEG decodes without
+    # createImageBitmap. Change it and re-run ingest to compare.
+    VIEW_COMPRESSION: Literal["WEBP", "JPEG"] = "WEBP"
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

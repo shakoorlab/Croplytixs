@@ -412,6 +412,105 @@ is untouched and the service stays paused until you lift the cap. One option whi
 the API still has no login:
 https://docs.cloud.google.com/billing/docs/how-to/budgets-spend-caps
 
+## 10. The ingest job — every ortho becomes two COGs
+
+Every ortho upload now starts *ingest* (`app/ingest.py`). It turns the stored ortho
+into two Cloud-Optimized GeoTIFFs under `trials/…/flights/…/derived/`:
+
+- `cog.tif` — lossless, every band, for the clip and inference jobs;
+- `view.tif` — 8-bit natural colour plus a mask, WebP, about a fifth of the
+  original's size, for the map.
+
+The flight's `ingest` field records the state (`queued → running → complete` or
+`failed`, with the reason) and where the ortho sits (CRS, bounds, size). The flight
+page shows it under **Map copies**.
+
+Ingest runs as a Cloud Run **job**, not inside the API. A job is a container that
+runs to the end and exits: it gets its own memory, so GDAL never shares the API's
+512 MiB, and it bills only while it runs. It is the same image as the API with a
+different command, so there is nothing new to build.
+
+From `backend/`, after step 6 has deployed this code:
+
+```bash
+export IMAGE=$(gcloud run services describe croplytix-api --region $REGION \
+  --format='value(spec.template.spec.containers[0].image)')
+echo $IMAGE
+
+gcloud run jobs deploy croplytix-ingest \
+  --image $IMAGE \
+  --region $REGION \
+  --service-account $SA_EMAIL \
+  --env-vars-file deploy/env.cloudrun.yaml \
+  --command python \
+  --args=-m,app.ingest \
+  --memory 2Gi \
+  --cpu 1 \
+  --max-retries 0 \
+  --task-timeout 30m
+
+# The API may start this one job, with a FLIGHT_ID of its choosing — nothing else.
+gcloud run jobs add-iam-policy-binding croplytix-ingest \
+  --region $REGION \
+  --member="serviceAccount:$SA_EMAIL" \
+  --role="roles/run.jobsExecutorWithOverrides"
+```
+
+*Why each piece:*
+
+- `--image $IMAGE` — the image the API is running, so the job and the API run
+  the same code.
+- `--service-account $SA_EMAIL` — the API's identity. It already reads and writes
+  this bucket and Firestore, which is all ingest does.
+- `--env-vars-file` — the same bucket and database settings. The `INGEST_*` lines
+  in it are for the API; the job ignores them.
+- `--memory 2Gi` — the job's disk is RAM too. It downloads the ortho and keeps one
+  output on disk at a time, so the peak is about the ortho plus its lossless copy
+  (~1.3×) plus GDAL's cache. Under the current 30 MB upload limit, 2 GiB is
+  plenty. When direct-to-bucket uploads lift that limit, size this at about 3× the
+  largest ortho (Cloud Run allows 32 GiB), or have ingest read the ortho in place
+  over `/vsigs/`.
+- `--max-retries 0` — a failure is written on the flight with its reason, and
+  retrying a corrupt file can't help. **Retry** on the flight page starts a fresh
+  execution.
+- `--task-timeout 30m` — the default is 10 minutes. The 15 MB sample takes about a
+  second; a multi-gigabyte ortho takes minutes.
+- `roles/run.jobsExecutorWithOverrides`, granted *on the job* — the API can start
+  executions of `croplytix-ingest` and set `FLIGHT_ID`. It can't change the job's
+  image or command, or run any other job.
+
+`deploy/env.cloudrun.yaml` sets `INGEST_RUNNER: "cloudrun"` and `INGEST_REGION`.
+That's what makes the API start the job instead of running ingest in-process. If
+the API was redeployed before the job existed, uploads in between show *failed:
+Could not start ingest* — press **Retry** on each one.
+
+**Every API deploy changes the image; the job keeps the old one until told:**
+
+```bash
+gcloud run jobs update croplytix-ingest --region $REGION \
+  --image $(gcloud run services describe croplytix-api --region $REGION \
+    --format='value(spec.template.spec.containers[0].image)')
+```
+
+Check it:
+
+```bash
+# Run it by hand for one flight (the id is on the flight page's URL).
+gcloud run jobs execute croplytix-ingest --region $REGION \
+  --update-env-vars FLIGHT_ID=flt_... --wait
+
+gcloud run jobs executions list --job croplytix-ingest --region $REGION --limit 5
+gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="croplytix-ingest"' \
+  --limit 30 --format='value(textPayload)'
+gcloud storage ls -l "gs://$BUCKET/trials/*/flights/*/derived/"
+```
+
+*What it costs:* job time bills per vCPU-second and GiB-second while it runs.
+Check the Cloud Run pricing page for how much the free tier covers. In the bucket,
+the two COGs add about 1.5× the ortho's size. In Artifact Registry, rasterio and
+numpy make the image about 160 MB bigger unpacked, so delete old images now and
+then to stay near the 0.5 GB free tier.
+
 ---
 
 ## Optional, but the best lesson in here: run the API on your laptop against the real cloud

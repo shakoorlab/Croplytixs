@@ -28,6 +28,7 @@ import StatTile from 'components/StatTile';
 import TrialTabs from 'sections/trials/TrialTabs';
 import QcChip from 'sections/trials/QcChip';
 import FlightStatusChip from 'sections/trials/FlightStatusChip';
+import MapCopies from 'sections/trials/MapCopies';
 import { NESTED_PANEL, NESTED_PANEL_FRAMED } from 'sections/trials/surfaces';
 import { formatBytes } from 'sections/trials/flight-setup/utils';
 import { useFlight, useTrial } from 'api/trials';
@@ -87,7 +88,7 @@ export default function FlightDetail() {
   const { trialId, flightId } = useParams();
   const navigate = useNavigate();
   const { data: trial, error: trialError } = useTrial(trialId);
-  const { flight, flights = NONE, isLoading, error } = useFlight(trialId, flightId);
+  const { flight, flights = NONE, isLoading, error, mutate } = useFlight(trialId, flightId);
 
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
@@ -243,6 +244,12 @@ export default function FlightDetail() {
                           .filter(Boolean)
                           .join(' · ')}
                       </Typography>
+                    </Row>
+                  )}
+                  {flight.source === 'ortho' && (
+                    <Row label="Map copies">
+                      {/* keyed so a message about one flight doesn't follow you to the next */}
+                      <MapCopies key={flight.id} trialId={trialId} flight={flight} onChanged={mutate} />
                     </Row>
                   )}
                   {flight.shapefile && (

@@ -62,6 +62,15 @@ export function createTrial(form) {
 }
 
 /**
+ * POST /api/trials/{id}/flights/{fid}/ingest — builds the flight's map copies
+ * (lossless + viewing COG) again, after a failure or for a flight uploaded
+ * before ingest existed. Answers 202 with the flight, its ingest `queued`.
+ */
+export function rerunIngest(trialId, flightId) {
+  return apiFetch(`${flightsKey(trialId)}/${flightId}/ingest`, { method: 'POST' });
+}
+
+/**
  * POST /api/trials/{id}/flights — multipart: a JSON `meta` field plus the files
  * under the part names the backend expects (`ortho`, `shapefile` ×N, `clipped` ×N).
  */

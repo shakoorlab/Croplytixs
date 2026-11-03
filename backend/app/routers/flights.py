@@ -17,9 +17,11 @@ a threadpool, which is exactly right for the Google client libraries — they
 are blocking, and an `async def` around them would stall the event loop for
 the whole upload.
 
-Today status ends at "uploaded". The clip + inference worker that moves it to
-queued → running → complete is the next slice of backend, and it will read the
-same document this writes.
+An ortho flight also starts *ingest* (app/ingest.py, started by app/jobs.py):
+the ortho becomes a lossless COG for the jobs and a viewing COG for the map,
+tracked in the flight's `ingest` field. `status` still ends at "uploaded"; the
+clip + inference worker that moves it to queued → running → complete is the
+next slice of backend, and it will read the same document this writes.
 """
 
 from __future__ import annotations
@@ -27,13 +29,14 @@ from __future__ import annotations
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from ..db import Repo, utcnow
 from ..deps import get_repo, get_store
 from ..ids import flight_id, safe_filename
+from ..jobs import queued, start_ingest
 from ..schemas import Flight, FlightMeta, StoredFile
 from ..settings import settings
 from ..storage import ObjectStore
@@ -82,6 +85,7 @@ def list_flights(trial_id: str, repo: Repo = Depends(get_repo)):
 @router.post("", response_model=Flight, status_code=201)
 def create_flight(
     trial_id: str,
+    background: BackgroundTasks,
     meta: Annotated[str, Form(description="FlightMeta as a JSON string")],
     ortho: Annotated[UploadFile | None, File()] = None,
     shapefile: Annotated[list[UploadFile], File()] = [],
@@ -126,7 +130,12 @@ def create_flight(
         "createdAt": utcnow(),
         "files": [f.model_dump() for f in files],
     }
+    if ortho:
+        doc["ingest"] = queued()
     repo.create_flight(doc)
+    if ortho:
+        # After the record exists: ingest reads and updates it.
+        doc["ingest"] = start_ingest(fid, repo, store, background)
     return doc
 
 
@@ -136,6 +145,28 @@ def get_flight(trial_id: str, flight_id: str, repo: Repo = Depends(get_repo)):
     if not flight or flight["trialId"] != trial_id:
         raise HTTPException(404, f"No flight '{flight_id}' in trial '{trial_id}'.")
     return flight
+
+
+@router.post("/{flight_id}/ingest", response_model=Flight, status_code=202)
+def rerun_ingest(
+    trial_id: str,
+    flight_id: str,
+    background: BackgroundTasks,
+    force: bool = False,
+    repo: Repo = Depends(get_repo),
+    store: ObjectStore = Depends(get_store),
+):
+    """Builds the flight's COGs again — after a failure, or for a flight
+    uploaded before ingest existed. The outputs are overwritten in place."""
+    flight = get_flight(trial_id, flight_id, repo)
+    if not any(f["role"] == "ortho" for f in flight.get("files", [])):
+        raise HTTPException(422, "This flight has no orthophoto to ingest.")
+    state = (flight.get("ingest") or {}).get("state")
+    if state in ("queued", "running") and not force:
+        raise HTTPException(409, f"Ingest is already {state}. Add ?force=true if it is stuck.")
+    repo.update_flight(flight_id, {"ingest": queued()})
+    record = start_ingest(flight_id, repo, store, background)
+    return {**flight, "ingest": record}
 
 
 @router.get("/{flight_id}/files/{role}/{name}")

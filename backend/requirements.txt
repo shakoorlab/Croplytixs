@@ -8,3 +8,8 @@ python-multipart==0.0.26          # FastAPI needs this to parse multipart/form-d
 google-cloud-storage==3.14.1
 google-cloud-firestore==2.30.0
 PyJWT[crypto]==2.15.1             # checks Identity Platform ID tokens (app/auth.py)
+# Ingest (app/ingest.py) — the wheel bundles GDAL 3.10, so the image needs no
+# system packages. Imported only by the ingest job (and by the API when
+# INGEST_RUNNER=inline), so the API on Cloud Run never loads GDAL into its 512 MiB.
+rasterio==1.4.4
+numpy==2.4.6

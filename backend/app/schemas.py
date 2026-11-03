@@ -87,6 +87,27 @@ class StoredFile(BaseModel):
     key: str  # object key inside the bucket
 
 
+class IngestOutput(BaseModel):
+    key: str  # object key inside the bucket
+    bytes: int
+    compression: str
+
+
+class Ingest(BaseModel):
+    """What ingest has made of the flight's orthophoto (app/ingest.py). Its own
+    state, separate from `Flight.status`: ingest is the first step of
+    processing, and a flight with its COGs built still has no results."""
+
+    state: Literal["queued", "running", "complete", "failed"]
+    queuedAt: str | None = None
+    startedAt: str | None = None
+    finishedAt: str | None = None
+    error: str | None = None
+    cog: IngestOutput | None = None  # lossless, every band — for the jobs
+    view: IngestOutput | None = None  # 8-bit natural colour + mask — for the map
+    raster: dict[str, Any] | None = None  # size, bands, CRS, bounds; see ingest.raster_info
+
+
 class Flight(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -106,3 +127,4 @@ class Flight(BaseModel):
     createdBy: str | None = None
     createdAt: str
     files: list[StoredFile] = []
+    ingest: Ingest | None = None  # source=ortho flights only

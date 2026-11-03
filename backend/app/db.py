@@ -51,6 +51,9 @@ class Repo(Protocol):
     def list_flights(self, trial_id: str) -> list[Doc]:
         """Newest first."""
 
+    def update_flight(self, flight_id: str, fields: Doc) -> None:
+        """Replace the given top-level fields, leave the rest of the document alone."""
+
     def describe(self) -> str: ...
 
 
@@ -87,6 +90,9 @@ class MemoryRepo:
     def list_flights(self, trial_id: str) -> list[Doc]:
         rows = [dict(d) for d in self._flights.values() if d["trialId"] == trial_id]
         return sorted(rows, key=lambda d: (d["flightDate"], d["createdAt"]), reverse=True)
+
+    def update_flight(self, flight_id: str, fields: Doc) -> None:
+        self._flights[flight_id].update(fields)
 
     def describe(self) -> str:
         return "memory"
@@ -139,6 +145,11 @@ class FirestoreRepo:
         query = self._db.collection(self.FLIGHTS).where(filter=FieldFilter("trialId", "==", trial_id))
         rows = [s.to_dict() for s in query.stream()]
         return sorted(rows, key=lambda d: (d.get("flightDate", ""), d.get("createdAt", "")), reverse=True)
+
+    def update_flight(self, flight_id: str, fields: Doc) -> None:
+        # `update` replaces each named field whole (a map value included) and
+        # fails if the document is missing — never a half-written new flight.
+        self._db.collection(self.FLIGHTS).document(flight_id).update(fields)
 
     def describe(self) -> str:
         return f"firestore:{self._database}"

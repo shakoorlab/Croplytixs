@@ -65,6 +65,7 @@ the end of `docs/gcp-setup.md` (Application Default Credentials).
 | GET | `/api/trials/{trial_id}` | one trial with derived stats |
 | GET / POST | `/api/trials/{trial_id}/flights` | list / create (multipart: `meta` JSON + `ortho`, `shapefile[]`, `clipped[]`) |
 | GET | `/api/trials/{trial_id}/flights/{flight_id}` | one flight |
+| POST | `/api/trials/{trial_id}/flights/{flight_id}/ingest` | build the flight's COGs again (`?force=true` if stuck) |
 | GET | `/api/trials/{trial_id}/flights/{flight_id}/files/{role}/{name}` | stream a stored file back |
 
 `/docs` has the live version with schemas and a try-it-out form.
@@ -78,6 +79,8 @@ the end of `docs/gcp-setup.md` (Application Default Credentials).
   next backend slice after auth.
 - **No authentication.** The service URL is public. Next slice: Identity Platform /
   Firebase Auth tokens checked in a dependency.
-- **Status stops at `uploaded`.** The clip-and-infer worker that moves a flight to
-  `complete` and fills `meanCover` / `flagged` is a Cloud Run *job* (or a worker
-  pool), reading the same Firestore document this API writes.
+- **Status stops at `uploaded`.** Ingest (`app/ingest.py`, the Cloud Run job
+  `croplytix-ingest`) turns each ortho into a lossless COG and a viewing COG and
+  records them in the flight's `ingest` field. The clip-and-infer worker that moves
+  `status` to `complete` and fills `meanCover` / `flagged` comes next, and will
+  read the lossless COG.
