@@ -17,6 +17,20 @@ export const trialsKey = () => '/api/trials';
 export const trialKey = (trialId) => (trialId ? `/api/trials/${trialId}` : null);
 export const flightsKey = (trialId) => (trialId ? `/api/trials/${trialId}/flights` : null);
 
+/**
+ * Every status the API can put on a flight — the `Flight.status` Literal in
+ * backend/app/schemas.py — and what it means to whoever is looking at it.
+ * Today the API only ever writes `uploaded`; the processing worker will move
+ * a flight through the rest. Pages show the record's status as it is.
+ */
+export const FLIGHT_STATUSES = {
+  uploaded: 'Files stored; waiting for the processing worker.',
+  queued: 'In line for the processing worker.',
+  running: 'Clipping plots and segmenting canopy.',
+  complete: 'Processing finished.',
+  failed: 'Processing stopped with an error.'
+};
+
 export function useTrials() {
   return useSWR(trialsKey(), fetcher, opts);
 }
@@ -27,6 +41,19 @@ export function useTrial(trialId) {
 
 export function useFlights(trialId) {
   return useSWR(flightsKey(trialId), fetcher, opts);
+}
+
+/**
+ * One flight, read out of the trial's flight list rather than its own
+ * `GET …/flights/{fid}`: the Flights tab has nearly always fetched the list
+ * already, so opening a row renders from cache at once, and the flight page
+ * needs the whole list for its tab badge anyway. `flight` is undefined while
+ * loading, null when the trial has no flight with that id.
+ */
+export function useFlight(trialId, flightId) {
+  const { data, error, isLoading, mutate } = useFlights(trialId);
+  const flight = data ? data.find((candidate) => candidate.id === flightId) || null : undefined;
+  return { flight, flights: data, error, isLoading, mutate };
 }
 
 /** POST /api/trials — body is the dialog's form; the API mints the id. */

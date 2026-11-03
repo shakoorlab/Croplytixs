@@ -15,6 +15,9 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import LinearProgress from '@mui/material/LinearProgress';
 
+// project imports
+import FlightStatusChip from 'sections/trials/FlightStatusChip';
+
 // assets
 import CloudUploadOutlined from '@ant-design/icons/CloudUploadOutlined';
 import PlusOutlined from '@ant-design/icons/PlusOutlined';
@@ -38,14 +41,6 @@ const frame = (theme) => ({
   // the frame supplies the closing line; the last row shouldn't draw its own
   '& tbody tr:last-of-type td': { borderBottom: 0 }
 });
-
-const STATUS = {
-  uploaded: { label: 'uploaded', color: 'secondary' },
-  complete: { label: 'complete', color: 'success' },
-  running: { label: 'running', color: 'primary' },
-  queued: { label: 'queued', color: 'secondary' },
-  failed: { label: 'failed', color: 'error' }
-};
 
 // ==============================|| TRIALS - RUNS TABLE ||============================== //
 
@@ -91,7 +86,6 @@ export default function RunsTable({ runs = [], onOpenRun, onReviewRun, onNewRun 
         </TableHead>
         <TableBody>
           {runs.map((run) => {
-            const status = STATUS[run.status] || STATUS.queued;
             return (
               <TableRow key={run.id} hover onClick={() => onOpenRun?.(run)} sx={{ cursor: onOpenRun ? 'pointer' : 'default' }}>
                 <TableCell sx={{ ...mono, fontWeight: 600 }}>{run.flightDate}</TableCell>
@@ -107,7 +101,7 @@ export default function RunsTable({ runs = [], onOpenRun, onReviewRun, onNewRun 
                 <TableCell sx={mono}>{run.model}</TableCell>
                 <TableCell>
                   <Stack direction="row" sx={{ gap: 0.75, alignItems: 'center' }}>
-                    <Chip size="small" label={status.label} sx={{ bgcolor: `${status.color}.lighter`, color: `${status.color}.main` }} />
+                    <FlightStatusChip status={run.status} />
                     {run.status === 'failed' && run.error && (
                       <Tooltip title={run.error}>
                         <Box sx={{ display: 'flex', color: 'error.main', fontSize: '0.8rem' }}>

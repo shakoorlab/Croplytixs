@@ -12,8 +12,7 @@ import LinearProgress from '@mui/material/LinearProgress';
 import PageHeader from 'components/PageHeader';
 import TrialTabs from 'sections/trials/TrialTabs';
 import RunsTable from 'sections/trials/RunsTable';
-import { useTrial } from 'api/trials';
-import { useTrialResults } from 'api/results';
+import { useFlights, useTrial } from 'api/trials';
 
 // assets
 import PlusOutlined from '@ant-design/icons/PlusOutlined';
@@ -25,10 +24,10 @@ export default function TrialRuns() {
   const navigate = useNavigate();
 
   const { data: trial, error: trialError, isLoading: trialLoading } = useTrial(trialId);
-  // Flights come from the API; their processing state, flag counts and mean
-  // cover come from api/results until the worker writes them onto the record.
-  const { flights: runs, error: runsError, isLoading: runsLoading, mutate } = useTrialResults(trialId);
-  const flagged = runs.reduce((sum, run) => sum + (run.flagged || 0), 0);
+  // Status, flag count and mean cover are the flight record's own; until the
+  // worker fills them a flight reads `uploaded` with dashes, which is the truth.
+  const { data: runs, error: runsError, isLoading: runsLoading, mutate } = useFlights(trialId);
+  const flagged = (runs || []).reduce((sum, run) => sum + (run.flagged || 0), 0);
 
   const crumbs = [
     { label: 'Croplytix', to: '/' },
@@ -105,18 +104,20 @@ export default function TrialRuns() {
           )}
           {runsLoading && <LinearProgress sx={{ height: 2, mb: 2 }} />}
 
-          <RunsTable
-            runs={runs}
-            onNewRun={goToUpload}
-            onOpenRun={(run) => navigate(`/trials/${trial.id}/flights/${run.id}`)}
-            onReviewRun={(run) => navigate(`/trials/${trial.id}/review?flight=${run.id}`)}
-          />
+          {/* only once the list has arrived — "No flights yet" is a claim, not a placeholder */}
+          {runs && (
+            <RunsTable
+              runs={runs}
+              onNewRun={goToUpload}
+              onOpenRun={(run) => navigate(`/trials/${trial.id}/flights/${run.id}`)}
+              onReviewRun={(run) => navigate(`/trials/${trial.id}/review?flight=${run.id}`)}
+            />
+          )}
 
-          {runs.length > 0 && (
+          {runs?.length > 0 && (
             <Box sx={{ display: 'flex', justifyContent: 'flex-end', pt: 2 }}>
               <Typography variant="caption" color="text.secondary">
                 {runs.length} flight{runs.length === 1 ? '' : 's'} · newest first
-                {runs[0]?.demo ? ' · fixture set until the first upload' : ''}
               </Typography>
             </Box>
           )}

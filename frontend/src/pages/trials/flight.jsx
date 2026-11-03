@@ -7,7 +7,6 @@ import Grid from '@mui/material/Grid';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
-import Chip from '@mui/material/Chip';
 import Alert from '@mui/material/Alert';
 import Link from '@mui/material/Link';
 import LinearProgress from '@mui/material/LinearProgress';
@@ -28,9 +27,10 @@ import PageHeader from 'components/PageHeader';
 import StatTile from 'components/StatTile';
 import TrialTabs from 'sections/trials/TrialTabs';
 import QcChip from 'sections/trials/QcChip';
+import FlightStatusChip from 'sections/trials/FlightStatusChip';
 import { NESTED_PANEL, NESTED_PANEL_FRAMED } from 'sections/trials/surfaces';
 import { formatBytes } from 'sections/trials/flight-setup/utils';
-import { useFlightResults } from 'api/results';
+import { useFlight, useTrial } from 'api/trials';
 import { apiDownload } from 'api/client';
 import { MODELS } from 'api/models';
 import LifecycleChip from 'sections/models/LifecycleChip';
@@ -40,17 +40,18 @@ import formatRelative from 'utils/formatRelative';
 import SearchOutlined from '@ant-design/icons/SearchOutlined';
 import PlayCircleOutlined from '@ant-design/icons/PlayCircleOutlined';
 import LoadingOutlined from '@ant-design/icons/LoadingOutlined';
+import CheckCircleOutlined from '@ant-design/icons/CheckCircleOutlined';
 
 const mono = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.8125rem' };
 const cell = { ...mono, whiteSpace: 'nowrap' };
 const NONE = [];
 
-const STATUS = {
-  uploaded: { label: 'uploaded', color: 'secondary' },
-  complete: { label: 'complete', color: 'success' },
-  running: { label: 'running', color: 'primary' },
-  queued: { label: 'queued', color: 'secondary' },
-  failed: { label: 'failed', color: 'error' }
+// What the results panel says while the flight has no per-plot results to list.
+const WAITING = {
+  uploaded: 'Uploaded · waiting for the processing worker',
+  queued: 'Queued · waiting for the processing worker',
+  complete: 'Processing complete',
+  failed: 'This run failed'
 };
 
 const FILTERS = [
@@ -85,12 +86,15 @@ function Row({ label, children, mono: isMono = false }) {
 export default function FlightDetail() {
   const { trialId, flightId } = useParams();
   const navigate = useNavigate();
-  const { trial, flight, flights, isLoading, error, trialError } = useFlightResults(trialId, flightId);
+  const { data: trial, error: trialError } = useTrial(trialId);
+  const { flight, flights = NONE, isLoading, error } = useFlight(trialId, flightId);
 
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [downloadError, setDownloadError] = useState(null);
 
+  // The flights API carries no per-plot results yet; `results` arrives with
+  // `GET …/flights/{fid}/results`. Until then the panel shows the status instead.
   const plots = flight?.results?.plots || NONE;
   const summary = flight?.results?.summary;
 
@@ -141,7 +145,6 @@ export default function FlightDetail() {
     );
   }
 
-  const status = STATUS[flight?.status] || STATUS.queued;
   const model = flight ? MODELS.find((candidate) => candidate.id === flight.modelId || candidate.label === flight.model) : null;
   const openReviewer = (plotId) =>
     navigate(`/trials/${trialId}/review/session?flight=${flightId}&queue=all${plotId ? `&plot=${plotId}` : ''}`);
@@ -151,7 +154,7 @@ export default function FlightDetail() {
       <Grid size={12}>
         <PageHeader
           crumbs={[...crumbs, { label: flight ? `Flight ${flight.flightDate}` : 'Flight' }]}
-          title={flight ? `Flight ${flight.flightDate}` : 'Loading flight…'}
+          title={flight ? `Flight ${flight.flightDate}` : error ? 'Could not load flight' : 'Loading flight…'}
           subtitle={
             flight
               ? `${flight.captureLabel || flight.capture} · ${flight.source === 'ortho' ? 'ortho + .shp' : 'pre-clipped'} · ${flight.plots} plots · ${flight.createdBy || 'unknown'} · ${formatRelative(flight.createdAt)}`
@@ -163,9 +166,9 @@ export default function FlightDetail() {
                 variant="contained"
                 startIcon={<PlayCircleOutlined />}
                 onClick={() => navigate(`/trials/${trialId}/review?flight=${flightId}`)}
-                color={summary?.pending ? 'primary' : 'secondary'}
+                color={flight.flagged ? 'primary' : 'secondary'}
               >
-                {summary?.pending ? `Review ${summary.pending} flagged` : 'Open in Review'}
+                {flight.flagged ? `Review ${flight.flagged} flagged` : 'Open in Review'}
               </Button>
             ) : null
           }
@@ -176,7 +179,7 @@ export default function FlightDetail() {
         <TrialTabs trialId={trialId} current="flights" flagged={flights.reduce((sum, candidate) => sum + (candidate.flagged || 0), 0)}>
           {error && (
             <Alert severity="error" variant="outlined" sx={{ mb: 2 }}>
-              Could not load results — {error.message}
+              Could not load flight — {error.message}
             </Alert>
           )}
           {isLoading && <LinearProgress sx={{ height: 2, mb: 2 }} />}
@@ -188,7 +191,7 @@ export default function FlightDetail() {
                 <MainCard title="Run manifest" sx={NESTED_PANEL} contentSX={{ pt: 1 }}>
                   <Row label="Status">
                     <Stack direction="row" sx={{ gap: 1, alignItems: 'center' }}>
-                      <Chip size="small" label={status.label} sx={{ bgcolor: `${status.color}.lighter`, color: `${status.color}.main` }} />
+                      <FlightStatusChip status={flight.status} />
                       {flight.status === 'running' && (
                         <>
                           <LinearProgress variant="determinate" value={flight.progress} sx={{ width: 90, height: 3 }} />
@@ -314,32 +317,27 @@ export default function FlightDetail() {
                       </Stack>
                     </Row>
                   )}
-                  {flight.demo && (
-                    <Row label="Inputs">
-                      <Typography variant="caption" color="text.secondary">
-                        Fixture flight — no files stored. Upload a flight to replace this set.
-                      </Typography>
-                    </Row>
-                  )}
                 </MainCard>
               </Grid>
 
               {/* ---- results ---- */}
               <Grid size={{ xs: 12, lg: 8 }}>
-                {flight.status !== 'complete' ? (
+                {!summary ? (
                   <Stack sx={(theme) => ({ ...NESTED_PANEL_FRAMED(theme), alignItems: 'center', gap: 1.5, py: 8, px: 3 })}>
                     <Box sx={{ fontSize: '2rem', color: 'text.disabled', display: 'flex' }}>
-                      <LoadingOutlined spin={flight.status === 'running'} />
+                      {flight.status === 'complete' ? <CheckCircleOutlined /> : <LoadingOutlined spin={flight.status === 'running'} />}
                     </Box>
                     <Typography variant="subtitle1">
-                      {flight.status === 'running' && `Clipping and segmenting · ${flight.progress}%`}
-                      {flight.status === 'failed' && 'This run failed'}
-                      {['uploaded', 'queued'].includes(flight.status) && 'Waiting for the processing worker'}
+                      {flight.status === 'running'
+                        ? `Clipping and segmenting · ${flight.progress}%`
+                        : WAITING[flight.status] || `Status: ${flight.status}`}
                     </Typography>
                     <Typography variant="body2" color="text.secondary" align="center" sx={{ maxWidth: 460 }}>
-                      {flight.status === 'failed'
-                        ? flight.error || 'No error detail recorded.'
-                        : 'Per-plot masks, fractional cover and canopy area land here when inference finishes. Nothing to do until then.'}
+                      {flight.status === 'failed' && (flight.error || 'No error detail recorded.')}
+                      {flight.status === 'complete' &&
+                        'The API does not serve per-plot results yet. They will be listed here once it does.'}
+                      {!['failed', 'complete'].includes(flight.status) &&
+                        'Per-plot masks, fractional cover and canopy area land here when inference finishes. Nothing to do until then.'}
                     </Typography>
                     {flight.status === 'running' && (
                       <LinearProgress variant="determinate" value={flight.progress} sx={{ width: 240, height: 4, mt: 1 }} />
