@@ -19,6 +19,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# The rasterio wheel bundles GDAL and almost everything GDAL links to, but not
+# libexpat, which the slim image leaves out; without it `import rasterio` fails
+# with "libexpat.so.1: cannot open shared object file". Everything else the
+# wheels need from the system (glibc, libstdc++, libgcc_s, zlib) is already in
+# the base image.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libexpat1 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Dependencies first, on their own layer: Docker caches this layer keyed on
 # requirements.txt, so editing app code does not reinstall packages.
 COPY requirements.txt .
