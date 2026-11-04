@@ -320,6 +320,35 @@ export default function FlightDateSetup() {
     }
   };
 
+  // Full width, directly under the preview (or the image table in pre-clipped mode).
+  const detailsPanel = (
+    <Stack sx={{ gap: 2 }}>
+      <FlightDetailsPanel
+        values={config}
+        onChange={setConfig}
+        gsdCm={isOrthoMode ? ortho?.gsdCm : undefined}
+        gsdSource={isOrthoMode ? 'Read from the orthophoto’s georeferencing.' : 'Read from the GeoTIFF’s georeferencing.'}
+        uploading={running}
+        progress={progress}
+        canUpload={blockers.length === 0}
+        blockers={blockers}
+        inputsStaged={isOrthoMode ? Boolean(ortho) : Boolean(clipped)}
+        actualBands={isOrthoMode ? ortho?.colourBandCount : null}
+        uploadSummary={uploadSummary}
+        onUpload={handleUpload}
+        onOverrideGsd={() => {
+          // opens a dialog collecting altitude + sensor + focal length
+        }}
+      />
+
+      {submitError && (
+        <Alert severity="error" variant="outlined" onClose={() => setSubmitError(null)}>
+          {submitError}
+        </Alert>
+      )}
+    </Stack>
+  );
+
   return (
     <Grid container rowSpacing={2.5} columnSpacing={2.75}>
       {/* ---- header ---- */}
@@ -347,28 +376,31 @@ export default function FlightDateSetup() {
           <Grid container rowSpacing={2.5} columnSpacing={2.75}>
             {/* ---- source mode ---- */}
             <Grid size={12}>
-              <Stack direction="row" sx={{ gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
-                <Typography variant="caption" color="text.secondary">
-                  Source
-                </Typography>
-                <ToggleButtonGroup
-                  exclusive
-                  size="small"
-                  value={sourceMode}
-                  onChange={(event, value) => value && setSourceMode(value)}
-                  disabled={running}
-                  sx={{
-                    '& .MuiToggleButton-root.Mui-selected': {
-                      color: 'primary.main',
-                      bgcolor: 'primary.lighter',
-                      borderColor: 'primary.light',
-                      '&:hover': { bgcolor: 'primary.lighter' }
-                    }
-                  }}
-                >
-                  <ToggleButton value="ortho">Ortho + plot shapefile</ToggleButton>
-                  <ToggleButton value="clipped">Pre-clipped plot images</ToggleButton>
-                </ToggleButtonGroup>
+              <Stack direction="row" sx={{ gap: 1.5, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                <Stack sx={{ gap: 0.75 }}>
+                  <Typography id="source-mode-label" variant="caption" color="text.secondary">
+                    Source
+                  </Typography>
+                  <ToggleButtonGroup
+                    exclusive
+                    size="small"
+                    aria-labelledby="source-mode-label"
+                    value={sourceMode}
+                    onChange={(event, value) => value && setSourceMode(value)}
+                    disabled={running}
+                    sx={{
+                      '& .MuiToggleButton-root.Mui-selected': {
+                        color: 'primary.main',
+                        bgcolor: 'primary.lighter',
+                        borderColor: 'primary.light',
+                        '&:hover': { bgcolor: 'primary.lighter' }
+                      }
+                    }}
+                  >
+                    <ToggleButton value="ortho">Ortho + plot shapefile</ToggleButton>
+                    <ToggleButton value="clipped">Pre-clipped plot images</ToggleButton>
+                  </ToggleButtonGroup>
+                </Stack>
 
                 <Box sx={{ flex: 1 }} />
 
@@ -385,8 +417,8 @@ export default function FlightDateSetup() {
               </Stack>
             </Grid>
 
-            {/* ---- left column ---- */}
-            <Grid size={{ xs: 12, lg: 8 }}>
+            {/* ---- one full-width column: files, preview, flight details, then the rest ---- */}
+            <Grid size={12}>
               <Stack sx={{ gap: 2.5 }}>
                 {isOrthoMode ? (
                   <>
@@ -474,6 +506,8 @@ export default function FlightDateSetup() {
                       </MainCard>
                     )}
 
+                    {detailsPanel}
+
                     <ShapefileMapping
                       fields={shapefile?.fields || []}
                       mapping={mapping}
@@ -509,37 +543,9 @@ export default function FlightDateSetup() {
                       parsedCount={clipped?.count || 0}
                       disabled={running || !clipped}
                     />
+
+                    {detailsPanel}
                   </>
-                )}
-              </Stack>
-            </Grid>
-
-            {/* ---- right rail ---- */}
-            <Grid size={{ xs: 12, lg: 4 }}>
-              {/* full height of the row, so the details card can match the left column */}
-              <Stack sx={{ gap: 2, height: '100%' }}>
-                <FlightDetailsPanel
-                  values={config}
-                  onChange={setConfig}
-                  gsdCm={isOrthoMode ? ortho?.gsdCm : undefined}
-                  gsdSource={isOrthoMode ? 'from ortho transform' : 'from GeoTIFF transform'}
-                  uploading={running}
-                  progress={progress}
-                  canUpload={blockers.length === 0}
-                  blockers={blockers}
-                  inputsStaged={isOrthoMode ? Boolean(ortho) : Boolean(clipped)}
-                  actualBands={isOrthoMode ? ortho?.colourBandCount : null}
-                  uploadSummary={uploadSummary}
-                  onUpload={handleUpload}
-                  onOverrideGsd={() => {
-                    // opens a dialog collecting altitude + sensor + focal length
-                  }}
-                />
-
-                {submitError && (
-                  <Alert severity="error" variant="outlined" onClose={() => setSubmitError(null)}>
-                    {submitError}
-                  </Alert>
                 )}
               </Stack>
             </Grid>

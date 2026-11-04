@@ -2,6 +2,7 @@ import PropTypes from 'prop-types';
 
 // material-ui
 import Box from '@mui/material/Box';
+import Grid from '@mui/material/Grid';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Divider from '@mui/material/Divider';
@@ -10,7 +11,7 @@ import MenuItem from '@mui/material/MenuItem';
 import TextField from '@mui/material/TextField';
 import Chip from '@mui/material/Chip';
 import Alert from '@mui/material/Alert';
-import Link from '@mui/material/Link';
+import InputAdornment from '@mui/material/InputAdornment';
 import LinearProgress from '@mui/material/LinearProgress';
 
 // project imports
@@ -110,153 +111,163 @@ export default function FlightDetailsPanel({
   const captureFit = checkCaptureFit(capture, actualBands);
   const areaAvailable = Number.isFinite(gsdCm) && gsdCm > 0;
 
+  // The card spans the page, so the three fields sit side by side (stacking on
+  // narrow screens) and the upload is a footer row rather than a full-width bar.
   return (
-    // Fills the rail, so the card runs as long as the column of boxes beside it.
-    <MainCard
-      content={false}
-      sx={(theme) => ({ ...NESTED_PANEL(theme), flex: 1, display: 'flex', flexDirection: 'column' })}
-      title="Flight details"
-    >
-      <Stack sx={{ px: 2, py: 2, gap: 2 }}>
-        {/* flight date */}
-        <FormField id="run-flight-date" label="Flight date" required>
-          <TextField
-            id="run-flight-date"
-            size="small"
-            fullWidth
-            type="date"
-            value={values.flightDate}
-            onChange={set('flightDate')}
-            disabled={uploading}
-          />
-        </FormField>
-
-        {/* altitude / camera */}
-        <Box>
-          <FormField id="run-capture" label="Altitude / camera">
-            <TextField
-              id="run-capture"
-              select
-              size="small"
-              fullWidth
-              value={values.capture}
-              onChange={set('capture')}
-              disabled={uploading}
-              slotProps={{ select: { labelId: 'run-capture-label' } }}
-            >
-              {ALTITUDES.map((option) => (
-                <MenuItem key={option.value} value={option.value}>
-                  {option.label}
-                </MenuItem>
-              ))}
-            </TextField>
-          </FormField>
-
-          {/* only once a file has been read: before that there is nothing to compare */}
-          {captureFit && (
-            <Stack direction="row" sx={{ mt: 1, gap: 0.5, alignItems: 'center' }}>
-              {captureFit.fits ? (
-                <Chip
-                  size="small"
-                  icon={
-                    <Box sx={{ display: 'flex', fontSize: '0.75rem' }}>
-                      <CheckCircleOutlined />
-                    </Box>
-                  }
-                  label={`orthophoto has ${captureFit.actual} bands, as expected`}
-                  sx={{ bgcolor: 'success.lighter', color: 'success.main', '& .MuiChip-icon': { color: 'inherit' } }}
-                />
-              ) : (
-                <Alert
-                  severity="warning"
-                  variant="outlined"
-                  icon={<WarningOutlined />}
-                  sx={{ py: 0.25, flex: 1, '& .MuiAlert-message': { fontSize: '0.75rem' } }}
-                >
-                  This orthophoto has {captureFit.actual} colour bands; a {capture.label} capture has {captureFit.expected}. Pick the
-                  setting that matches, so the right model is offered when the flight is run.
-                </Alert>
-              )}
-              <InfoTip label="How this check works" title={<CaptureExplanation capture={capture} fit={captureFit} />} />
-            </Stack>
-          )}
-        </Box>
-
-        <Divider />
-
-        {/* GSD */}
-        <Box>
-          {/* GSD is only *missing* once something has been staged. Before that it
-              is simply not known yet, so it must not read as a validation error. */}
-          <FormField id="run-gsd" label="Ground sample distance" error={inputsStaged && !areaAvailable}>
-            <TextField
-              id="run-gsd"
-              size="small"
-              fullWidth
-              value={areaAvailable ? `${gsdCm} cm/px` : inputsStaged ? 'Unknown' : '—'}
-              slotProps={{
-                input: {
-                  readOnly: true,
-                  sx: { fontFamily: 'ui-monospace, monospace', fontSize: '0.8125rem' }
-                }
-              }}
-              error={inputsStaged && !areaAvailable}
-            />
-          </FormField>
-          <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-            {areaAvailable ? gsdSource : inputsStaged ? 'No georeferencing found' : 'Read from the file on upload'} ·{' '}
-            <Link component="button" type="button" underline="hover" onClick={onOverrideGsd} sx={{ fontSize: 'inherit' }}>
-              override
-            </Link>
-          </Typography>
-
-          {inputsStaged && !areaAvailable && (
-            <Alert severity="warning" variant="outlined" sx={{ mt: 1, py: 0.25, '& .MuiAlert-message': { fontSize: '0.75rem' } }}>
-              Without a ground sample distance, results will be % cover only, with no cm². Add one to get canopy area.
-            </Alert>
-          )}
-        </Box>
-      </Stack>
-
-      {/* auto margin: the upload sits at the card's foot, level with the end of the left column */}
-      <Divider sx={{ mt: 'auto' }} />
-
-      {/* upload */}
+    <MainCard content={false} sx={NESTED_PANEL} title="Flight details">
       <Box sx={{ px: 2, py: 2 }}>
-        {blockers.length > 0 && (
-          <Stack sx={{ gap: 0.5, mb: 1.5 }}>
+        <Grid container spacing={2}>
+          {/* flight date */}
+          <Grid size={{ xs: 12, md: 4 }}>
+            <FormField id="run-flight-date" label="Flight date" required>
+              <TextField
+                id="run-flight-date"
+                size="small"
+                fullWidth
+                type="date"
+                value={values.flightDate}
+                onChange={set('flightDate')}
+                disabled={uploading}
+              />
+            </FormField>
+          </Grid>
+
+          {/* altitude / camera */}
+          <Grid size={{ xs: 12, md: 4 }}>
+            <FormField id="run-capture" label="Altitude / camera">
+              <TextField
+                id="run-capture"
+                select
+                size="small"
+                fullWidth
+                value={values.capture}
+                onChange={set('capture')}
+                disabled={uploading}
+                slotProps={{ select: { labelId: 'run-capture-label' } }}
+              >
+                {ALTITUDES.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {option.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+            </FormField>
+          </Grid>
+
+          {/* Only once a file has been read: before that there is nothing to compare.
+              Its own row, spanning Flight date and Altitude so the message has room.
+              Source order puts it under Altitude when the fields stack; `order` moves it
+              after Ground sample distance on wide screens, so it wraps under the first two. */}
+          {captureFit && (
+            <Grid size={{ xs: 12, md: 8 }} sx={{ order: { md: 1 } }}>
+              <Stack direction="row" sx={{ gap: 0.5, alignItems: 'center' }}>
+                {captureFit.fits ? (
+                  <Chip
+                    size="small"
+                    icon={
+                      <Box sx={{ display: 'flex', fontSize: '0.75rem' }}>
+                        <CheckCircleOutlined />
+                      </Box>
+                    }
+                    label={`orthophoto has ${captureFit.actual} bands, as expected`}
+                    sx={{ bgcolor: 'success.lighter', color: 'success.main', '& .MuiChip-icon': { color: 'inherit' } }}
+                  />
+                ) : (
+                  <Alert
+                    severity="warning"
+                    variant="outlined"
+                    icon={<WarningOutlined />}
+                    sx={{ py: 0.25, flex: 1, '& .MuiAlert-message': { fontSize: '0.75rem' } }}
+                  >
+                    This orthophoto has {captureFit.actual} colour bands; a {capture.label} capture has {captureFit.expected}. Pick the
+                    setting that matches, so the right model is offered when the flight is run.
+                  </Alert>
+                )}
+                <InfoTip label="How this check works" title={<CaptureExplanation capture={capture} fit={captureFit} />} />
+              </Stack>
+            </Grid>
+          )}
+
+          {/* GSD */}
+          <Grid size={{ xs: 12, md: 4 }}>
+            {/* GSD is only *missing* once something has been staged. Before that it
+                is simply not known yet, so it must not read as a validation error. */}
+            <FormField id="run-gsd" label="Ground sample distance" error={inputsStaged && !areaAvailable}>
+              <TextField
+                id="run-gsd"
+                size="small"
+                fullWidth
+                value={areaAvailable ? `${gsdCm} cm/px` : inputsStaged ? 'Unknown' : '—'}
+                slotProps={{
+                  input: {
+                    readOnly: true,
+                    sx: { fontFamily: 'ui-monospace, monospace', fontSize: '0.8125rem', pr: 0.5 },
+                    endAdornment: onOverrideGsd && (
+                      <InputAdornment position="end">
+                        <Button size="small" onClick={onOverrideGsd} disabled={uploading} sx={{ minWidth: 0, px: 1 }}>
+                          Override
+                        </Button>
+                      </InputAdornment>
+                    )
+                  }
+                }}
+                error={inputsStaged && !areaAvailable}
+              />
+            </FormField>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+              {areaAvailable
+                ? gsdSource
+                : inputsStaged
+                  ? 'No georeferencing found in the file.'
+                  : 'Read from the orthophoto once it’s added.'}
+            </Typography>
+
+            {inputsStaged && !areaAvailable && (
+              <Alert severity="warning" variant="outlined" sx={{ mt: 1, py: 0.25, '& .MuiAlert-message': { fontSize: '0.75rem' } }}>
+                Without a ground sample distance, results will be % cover only, with no cm². Add one to get canopy area.
+              </Alert>
+            )}
+          </Grid>
+        </Grid>
+      </Box>
+
+      <Divider />
+
+      {/* upload: what's left to do (or what will be sent) on the left, the button on the right */}
+      <Box sx={{ px: 2, py: 2 }}>
+        <Stack direction={{ xs: 'column', sm: 'row' }} sx={{ gap: 2, alignItems: { xs: 'stretch', sm: 'center' } }}>
+          <Stack sx={{ flex: 1, minWidth: 0, gap: 0.5 }}>
             {blockers.map((blocker) => (
               <Typography key={blocker} variant="caption" color="error.main">
                 • {blocker}
               </Typography>
             ))}
+            {uploadSummary && !uploading && (
+              <Typography variant="caption" color="text.secondary">
+                {uploadSummary}
+              </Typography>
+            )}
           </Stack>
-        )}
 
-        <Button
-          fullWidth
-          variant="contained"
-          size="large"
-          startIcon={<CloudUploadOutlined />}
-          disabled={!canUpload || uploading}
-          onClick={onUpload}
-        >
-          {uploading ? 'Uploading…' : 'Upload'}
-        </Button>
+          <Button
+            variant="contained"
+            size="large"
+            startIcon={<CloudUploadOutlined />}
+            disabled={!canUpload || uploading}
+            onClick={onUpload}
+            sx={{ minWidth: 200 }}
+          >
+            {uploading ? 'Uploading…' : 'Upload'}
+          </Button>
+        </Stack>
 
-        {uploading ? (
+        {uploading && (
           <Box sx={{ mt: 1.5 }}>
             <LinearProgress variant="determinate" value={progress} />
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75, textAlign: 'center' }}>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
               {Math.round(progress)}% · keep this tab open until it finishes
             </Typography>
           </Box>
-        ) : (
-          uploadSummary && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1, textAlign: 'center' }}>
-              {uploadSummary}
-            </Typography>
-          )
         )}
       </Box>
     </MainCard>

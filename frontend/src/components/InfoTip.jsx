@@ -2,7 +2,9 @@ import PropTypes from 'prop-types';
 
 // material-ui
 import Box from '@mui/material/Box';
-import Tooltip from '@mui/material/Tooltip';
+
+// project imports
+import ThemedTooltip from 'components/ThemedTooltip';
 
 // assets
 import InfoCircleOutlined from '@ant-design/icons/InfoCircleOutlined';
@@ -10,47 +12,16 @@ import InfoCircleOutlined from '@ant-design/icons/InfoCircleOutlined';
 // ==============================|| INFO TIP ||============================== //
 
 /**
- * An (i) that explains the thing beside it. The bubble is the card surface —
- * paper, the A800 card border, the z1 float shadow — rather than MUI's grey
- * default, so it reads as part of the page in both schemes.
+ * An (i) that explains the thing beside it, in the app's themed tooltip.
  *
- * The trigger is a real button: keyboard focus opens it like hover does, and
- * `enterTouchDelay={0}` makes a tap open it on a phone instead of a long press.
- * `describeChild` keeps the button's own label and attaches the bubble as its
- * description, which is what a screen reader should announce.
+ * The trigger is a real button: keyboard focus opens it like hover does, and a
+ * tap opens it on a phone. `describeChild` keeps the button's own label and
+ * attaches the bubble as its description, which is what a screen reader should
+ * announce.
  */
 export default function InfoTip({ title, label = 'More information', placement = 'top', maxWidth = 300 }) {
   return (
-    <Tooltip
-      title={title}
-      placement={placement}
-      arrow
-      describeChild
-      enterTouchDelay={0}
-      leaveTouchDelay={8000}
-      slotProps={{
-        tooltip: {
-          sx: (theme) => ({
-            bgcolor: 'background.paper',
-            color: 'text.primary',
-            border: '1px solid',
-            borderColor: 'grey.A800',
-            borderRadius: 1.5,
-            boxShadow: theme.vars.customShadows.z1,
-            p: 1.5,
-            maxWidth,
-            fontSize: '0.75rem',
-            fontWeight: 400
-          })
-        },
-        arrow: {
-          sx: {
-            color: 'background.paper',
-            '&::before': { border: '1px solid', borderColor: 'grey.A800' }
-          }
-        }
-      }}
-    >
+    <ThemedTooltip title={title} placement={placement} maxWidth={maxWidth} describeChild>
       <Box
         component="button"
         type="button"
@@ -72,7 +43,7 @@ export default function InfoTip({ title, label = 'More information', placement =
       >
         <InfoCircleOutlined />
       </Box>
-    </Tooltip>
+    </ThemedTooltip>
   );
 }
 

@@ -14,9 +14,12 @@ import MenuItem from '@mui/material/MenuItem';
 import TextField from '@mui/material/TextField';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 
 // project imports
 import MainCard from 'components/MainCard';
+import ThemedTooltip from 'components/ThemedTooltip';
 import { NESTED_PANEL } from 'sections/trials/surfaces';
 import { BAND_COMBOS } from './geo/readOrtho';
 import { insetRing, offsetTransform, ringCentroid, ringToPoints } from './utils';
@@ -115,154 +118,179 @@ export default function OrthoOverview({
         </Typography>
       }
       secondary={
-        <Stack direction="row" sx={{ gap: 1, alignItems: 'center' }}>
-          {ortho.bandCount > 3 && onComboChange && (
-            <TextField
-              select
-              size="small"
-              aria-label="Band combination"
-              value={ortho.combo || 'natural'}
-              disabled={disabled || busy}
-              onChange={(event) => onComboChange(event.target.value)}
-              sx={{ width: 168 }}
-            >
-              {BAND_COMBOS.map((option) => (
-                <MenuItem key={option.id} value={option.id}>
-                  {option.label}
-                </MenuItem>
-              ))}
-            </TextField>
-          )}
-          <Button
+        <ThemedTooltip title="Spot-check 3 plots">
+          <IconButton
             size="small"
             color={spotCheck ? 'primary' : 'secondary'}
-            startIcon={<AimOutlined />}
+            aria-label="Spot-check 3 plots"
+            aria-pressed={spotCheck}
             onClick={() => setSpotCheck((v) => !v)}
+            sx={{
+              border: '1px solid',
+              borderColor: spotCheck ? 'primary.light' : 'grey.A800',
+              bgcolor: spotCheck ? 'primary.lighter' : 'transparent'
+            }}
           >
-            Spot-check 3 plots
-          </Button>
-        </Stack>
+            <AimOutlined />
+          </IconButton>
+        </ThemedTooltip>
       }
     >
-      {/* ---- canvas ---- */}
-      <Box
-        tabIndex={disabled ? -1 : 0}
-        onKeyDown={handleKeyDown}
-        aria-label={`Plot grid alignment preview. Use arrow keys to nudge the grid by ${stepCm} centimetres; hold shift for ${stepCm * 10} centimetre steps.`}
-        sx={{
-          position: 'relative',
-          width: '100%',
-          aspectRatio: `${w} / ${h}`,
-          bgcolor: 'grey.50',
-          borderBottom: '1px solid',
-          borderColor: 'grey.A800',
-          outline: 'none',
-          '&:focus-visible': { boxShadow: `inset 0 0 0 2px ${theme.vars.palette.primary.main}` }
-        }}
-      >
-        {overviewUrl ? (
-          <Box
-            component="img"
-            src={overviewUrl}
-            alt="Orthophoto overview"
-            // 'fill', not 'cover': the SVG overlay stretches with
-            // preserveAspectRatio="none", so any cropping here would slide the
-            // plot grid off the imagery it is supposed to be measuring.
-            sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', display: 'block' }}
-          />
-        ) : (
-          <PlaceholderField width={w} height={h} plots={plots} />
-        )}
+      {/* ---- band combination: its own row under the header, so the header never squeezes it ---- */}
+      {/* TEMP: shown whenever bandCount > 3 so the layout can be seen with an RGB + alpha ortho, where
+          both options draw the same picture. Switch back to `ortho.colourBandCount >= 4` (only orthos
+          with a near-infrared band have a colour-infrared view). */}
+      {ortho.bandCount > 3 && onComboChange && (
+        <Box sx={{ px: 2, py: 1.25, borderBottom: '1px solid', borderColor: 'grey.A800' }}>
+          <ToggleButtonGroup
+            exclusive
+            fullWidth
+            size="small"
+            aria-label="Band combination"
+            value={ortho.combo || 'natural'}
+            disabled={disabled || busy}
+            onChange={(event, value) => value && onComboChange(value)}
+            sx={{
+              maxWidth: 360,
+              '& .MuiToggleButton-root.Mui-selected': {
+                color: 'primary.main',
+                bgcolor: 'primary.lighter',
+                borderColor: 'primary.light',
+                '&:hover': { bgcolor: 'primary.lighter' }
+              }
+            }}
+          >
+            {BAND_COMBOS.map((option) => (
+              <ToggleButton key={option.id} value={option.id}>
+                {option.label}
+              </ToggleButton>
+            ))}
+          </ToggleButtonGroup>
+        </Box>
+      )}
 
-        {/* ---- plot polygons ---- */}
+      {/* ---- canvas ---- */}
+      {/* Capped at 72% of the window's height (and centred) so a full-width card doesn't
+          turn the preview into a page-long image. Width follows the cap, so the aspect
+          ratio — which the plot overlay depends on — is kept. */}
+      <Box sx={{ bgcolor: 'grey.50', borderBottom: '1px solid', borderColor: 'grey.A800' }}>
         <Box
-          component="svg"
-          viewBox={`0 0 ${w} ${h}`}
-          preserveAspectRatio="none"
-          sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+          tabIndex={disabled ? -1 : 0}
+          onKeyDown={handleKeyDown}
+          aria-label={`Plot grid alignment preview. Use arrow keys to nudge the grid by ${stepCm} centimetres; hold shift for ${stepCm * 10} centimetre steps.`}
+          sx={{
+            position: 'relative',
+            width: `min(100%, calc(72vh * ${w / h}))`,
+            mx: 'auto',
+            aspectRatio: `${w} / ${h}`,
+            outline: 'none',
+            '&:focus-visible': { boxShadow: `inset 0 0 0 2px ${theme.vars.palette.primary.main}` }
+          }}
         >
-          <g transform={transform}>
-            {/* Casing pass. A thin bright line vanishes over real imagery — the
+          {overviewUrl ? (
+            <Box
+              component="img"
+              src={overviewUrl}
+              alt="Orthophoto overview"
+              // 'fill', not 'cover': the SVG overlay stretches with
+              // preserveAspectRatio="none", so any cropping here would slide the
+              // plot grid off the imagery it is supposed to be measuring.
+              sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', display: 'block' }}
+            />
+          ) : (
+            <PlaceholderField width={w} height={h} plots={plots} />
+          )}
+
+          {/* ---- plot polygons ---- */}
+          <Box
+            component="svg"
+            viewBox={`0 0 ${w} ${h}`}
+            preserveAspectRatio="none"
+            sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+          >
+            <g transform={transform}>
+              {/* Casing pass. A thin bright line vanishes over real imagery — the
                 field is already green and red and busy. A dark stroke underneath
                 the accent one keeps the grid legible over bright soil and dark
                 canopy alike, which is the whole job of this overlay. */}
-            {rings.map((plot) => (
-              <polygon
-                key={`casing-${plot.plotId}`}
-                points={ringToPoints(plot.ring)}
-                fill="none"
-                stroke="rgba(0, 0, 0, 0.65)"
-                strokeWidth={spotIds.includes(plot.plotId) ? 4.5 : 3}
-                vectorEffect="non-scaling-stroke"
-              />
-            ))}
-            {rings.map((plot) => {
-              const highlighted = spotIds.includes(plot.plotId);
-              return (
+              {rings.map((plot) => (
                 <polygon
-                  key={plot.plotId}
+                  key={`casing-${plot.plotId}`}
                   points={ringToPoints(plot.ring)}
-                  fill={highlighted ? 'rgba(140, 245, 66, 0.22)' : 'none'}
-                  stroke={highlighted ? '#ffffff' : theme.vars.palette.primary.main}
-                  strokeWidth={highlighted ? 2.25 : 1.5}
+                  fill="none"
+                  stroke="rgba(0, 0, 0, 0.65)"
+                  strokeWidth={spotIds.includes(plot.plotId) ? 4.5 : 3}
                   vectorEffect="non-scaling-stroke"
                 />
-              );
-            })}
-            {spotCheck &&
-              rings
-                .filter((p) => spotIds.includes(p.plotId))
-                .map((plot) => {
-                  const [cx, cy] = ringCentroid(plot.ring);
-                  return (
-                    <text
-                      key={`label-${plot.plotId}`}
-                      x={cx}
-                      y={cy + 4}
-                      textAnchor="middle"
-                      fill="#ffffff"
-                      stroke="rgba(0,0,0,0.75)"
-                      strokeWidth="3"
-                      paintOrder="stroke"
-                      style={{ fontSize: 13, fontFamily: 'ui-monospace, monospace', fontWeight: 600 }}
-                    >
-                      {plot.plotId}
-                    </text>
-                  );
-                })}
-          </g>
-        </Box>
-
-        {busy && (
-          <Box
-            sx={{
-              position: 'absolute',
-              inset: 0,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              bgcolor: 'rgba(0,0,0,0.45)'
-            }}
-          >
-            <CircularProgress size={26} />
+              ))}
+              {rings.map((plot) => {
+                const highlighted = spotIds.includes(plot.plotId);
+                return (
+                  <polygon
+                    key={plot.plotId}
+                    points={ringToPoints(plot.ring)}
+                    fill={highlighted ? 'rgba(140, 245, 66, 0.22)' : 'none'}
+                    stroke={highlighted ? '#ffffff' : theme.vars.palette.primary.main}
+                    strokeWidth={highlighted ? 2.25 : 1.5}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                );
+              })}
+              {spotCheck &&
+                rings
+                  .filter((p) => spotIds.includes(p.plotId))
+                  .map((plot) => {
+                    const [cx, cy] = ringCentroid(plot.ring);
+                    return (
+                      <text
+                        key={`label-${plot.plotId}`}
+                        x={cx}
+                        y={cy + 4}
+                        textAnchor="middle"
+                        fill="#ffffff"
+                        stroke="rgba(0,0,0,0.75)"
+                        strokeWidth="3"
+                        paintOrder="stroke"
+                        style={{ fontSize: 13, fontFamily: 'ui-monospace, monospace', fontWeight: 600 }}
+                      >
+                        {plot.plotId}
+                      </text>
+                    );
+                  })}
+            </g>
           </Box>
-        )}
 
-        {/* ---- corner readout ---- */}
-        <Stack direction="row" sx={{ position: 'absolute', top: 10, left: 10, gap: 0.75 }}>
-          <Chip
-            size="small"
-            label={`${plots.length} plots`}
-            sx={{ bgcolor: 'background.paper', color: 'text.primary', fontFamily: 'ui-monospace, monospace' }}
-          />
-          {isNudged && (
+          {busy && (
+            <Box
+              sx={{
+                position: 'absolute',
+                inset: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                bgcolor: 'rgba(0,0,0,0.45)'
+              }}
+            >
+              <CircularProgress size={26} />
+            </Box>
+          )}
+
+          {/* ---- corner readout ---- */}
+          <Stack direction="row" sx={{ position: 'absolute', top: 10, left: 10, gap: 0.75 }}>
             <Chip
               size="small"
-              label="grid nudged"
-              sx={{ bgcolor: 'primary.lighter', color: 'primary.main', borderColor: 'primary.light' }}
+              label={`${plots.length} plots`}
+              sx={{ bgcolor: 'background.paper', color: 'text.primary', fontFamily: 'ui-monospace, monospace' }}
             />
-          )}
-        </Stack>
+            {isNudged && (
+              <Chip
+                size="small"
+                label="grid nudged"
+                sx={{ bgcolor: 'primary.lighter', color: 'primary.main', borderColor: 'primary.light' }}
+              />
+            )}
+          </Stack>
+        </Box>
       </Box>
 
       {/* ---- alignment toolbar ---- */}
