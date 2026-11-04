@@ -320,7 +320,8 @@ export default function FlightDateSetup() {
     }
   };
 
-  // Full width, directly under the preview (or the image table in pre-clipped mode).
+  // Full width and last, so Upload is the final step: after the shapefile fields
+  // (or the image table in pre-clipped mode).
   const detailsPanel = (
     <Stack sx={{ gap: 2 }}>
       <FlightDetailsPanel
@@ -358,9 +359,9 @@ export default function FlightDateSetup() {
             { label: 'Croplytix', to: '/' },
             { label: 'Field Trials', to: '/trials' },
             { label: trial?.name || trialId, to: flightsUrl },
-            { label: 'Upload imagery' }
+            { label: 'Upload Imagery' }
           ]}
-          title="Upload imagery"
+          title="Upload Imagery"
           subtitle={trial ? `${trial.crop} · ${trial.site} · ${trial.plots} plots in roster` : undefined}
           actions={
             <Button size="small" color="secondary" onClick={() => navigate(flightsUrl)}>
@@ -417,7 +418,7 @@ export default function FlightDateSetup() {
               </Stack>
             </Grid>
 
-            {/* ---- one full-width column: files, preview, flight details, then the rest ---- */}
+            {/* ---- one full-width column: files, preview, shapefile fields, then flight details + upload ---- */}
             <Grid size={12}>
               <Stack sx={{ gap: 2.5 }}>
                 {isOrthoMode ? (
@@ -506,8 +507,6 @@ export default function FlightDateSetup() {
                       </MainCard>
                     )}
 
-                    {detailsPanel}
-
                     <ShapefileMapping
                       fields={shapefile?.fields || []}
                       mapping={mapping}
@@ -515,6 +514,8 @@ export default function FlightDateSetup() {
                       roster={roster}
                       disabled={running || !shapefile}
                     />
+
+                    {detailsPanel}
                   </>
                 ) : (
                   <>

@@ -36,7 +36,7 @@ export default function PreClippedTable({ pattern, onPatternChange, rows = [], t
     <MainCard content={false} sx={NESTED_PANEL}>
       <Stack direction="row" sx={{ gap: 1.5, px: 2, py: 1.75, alignItems: 'center', flexWrap: 'wrap' }}>
         <Typography variant="subtitle2" sx={{ minWidth: 116 }}>
-          Filename pattern
+          Filename Pattern
         </Typography>
         <TextField
           size="small"

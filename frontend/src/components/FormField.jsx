@@ -16,16 +16,30 @@ import FormHelperText from '@mui/material/FormHelperText';
  * so no notch is cut, and the accessible name comes from `htmlFor` instead.
  * The caller owns the input and must give it the same `id`; when there is helper text,
  * point the input's `aria-describedby` at `${id}-helper` so it is announced with the field.
+ *
+ * `labelAdornment` (an InfoTip, say) sits beside the label rather than inside it:
+ * a button inside a <label> is invalid, and clicking it would also activate the label.
  */
-export default function FormField({ id, label, required = false, error = false, helperText, children, sx }) {
+export default function FormField({ id, label, labelAdornment, required = false, error = false, helperText, children, sx }) {
+  // `htmlFor` names plain inputs; selects render a combobox div that needs
+  // `aria-labelledby`, so the label also carries a stable id.
+  const inputLabel = (
+    <InputLabel id={`${id}-label`} htmlFor={id} required={required} error={error}>
+      {label}
+    </InputLabel>
+  );
+
   return (
     <Box sx={sx}>
       <Stack sx={{ gap: 1 }}>
-        {/* `htmlFor` names plain inputs; selects render a combobox div that needs
-            `aria-labelledby`, so the label also carries a stable id. */}
-        <InputLabel id={`${id}-label`} htmlFor={id} required={required} error={error}>
-          {label}
-        </InputLabel>
+        {labelAdornment ? (
+          <Stack direction="row" sx={{ gap: 0.5, alignItems: 'center' }}>
+            {inputLabel}
+            {labelAdornment}
+          </Stack>
+        ) : (
+          inputLabel
+        )}
         {children}
       </Stack>
       {helperText && (
@@ -40,6 +54,7 @@ export default function FormField({ id, label, required = false, error = false, 
 FormField.propTypes = {
   id: PropTypes.string.isRequired,
   label: PropTypes.node,
+  labelAdornment: PropTypes.node,
   required: PropTypes.bool,
   error: PropTypes.bool,
   helperText: PropTypes.node,

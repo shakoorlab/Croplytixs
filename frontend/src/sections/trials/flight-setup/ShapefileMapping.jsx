@@ -65,10 +65,10 @@ export default function ShapefileMapping({ fields = [], mapping, onMappingChange
   ];
 
   return (
-    <MainCard content={false} sx={NESTED_PANEL} title="Shapefile fields">
+    <MainCard content={false} sx={NESTED_PANEL} title="Shapefile Fields">
       <Stack direction="row" sx={{ gap: 1.5, px: 2, pt: 2, alignItems: 'center', flexWrap: 'wrap' }}>
         <Typography variant="caption" color="text.secondary">
-          Plot identity
+          Plot Identity
         </Typography>
         <ToggleButtonGroup
           exclusive
@@ -132,7 +132,7 @@ export default function ShapefileMapping({ fields = [], mapping, onMappingChange
 
       <Stack direction="row" sx={{ gap: 1.5, px: 2, py: 1.75, alignItems: 'center', flexWrap: 'wrap' }}>
         <Typography variant="subtitle2" sx={{ mr: 0.5 }}>
-          Against trial roster
+          Against Trial Roster
         </Typography>
 
         {/* Before a shapefile exists there is nothing to reconcile. A green

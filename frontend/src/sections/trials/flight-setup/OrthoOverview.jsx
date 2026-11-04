@@ -12,7 +12,6 @@ import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import MenuItem from '@mui/material/MenuItem';
 import TextField from '@mui/material/TextField';
-import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
@@ -32,8 +31,27 @@ import ArrowLeftOutlined from '@ant-design/icons/ArrowLeftOutlined';
 import ArrowRightOutlined from '@ant-design/icons/ArrowRightOutlined';
 import UndoOutlined from '@ant-design/icons/UndoOutlined';
 import AimOutlined from '@ant-design/icons/AimOutlined';
+import AppstoreOutlined from '@ant-design/icons/AppstoreOutlined';
 
 const INSET_OPTIONS = [0, 5, 10, 15, 20, 30];
+
+// The preview's corner badges: card surface, card border, the float shadow.
+const BADGE = (theme) => ({
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 0.625,
+  height: 24,
+  px: 1,
+  borderRadius: 1,
+  border: '1px solid',
+  borderColor: 'grey.A800',
+  bgcolor: 'background.paper',
+  color: 'text.primary',
+  boxShadow: theme.vars.customShadows.z1,
+  fontSize: '0.75rem',
+  lineHeight: 1,
+  fontVariantNumeric: 'tabular-nums'
+});
 const ROTATION_STEP = 0.1;
 
 // deterministic pseudo-random in [0,1) so renders stay stable across re-mounts
@@ -111,7 +129,7 @@ export default function OrthoOverview({
     <MainCard
       content={false}
       sx={NESTED_PANEL}
-      title="Overview · grid alignment"
+      title="Overview · Grid Alignment"
       subheader={
         <Typography variant="caption" color="text.secondary">
           Downsampled preview — full resolution is inspected per plot in review
@@ -137,10 +155,9 @@ export default function OrthoOverview({
       }
     >
       {/* ---- band combination: its own row under the header, so the header never squeezes it ---- */}
-      {/* TEMP: shown whenever bandCount > 3 so the layout can be seen with an RGB + alpha ortho, where
-          both options draw the same picture. Switch back to `ortho.colourBandCount >= 4` (only orthos
-          with a near-infrared band have a colour-infrared view). */}
-      {ortho.bandCount > 3 && onComboChange && (
+      {/* Colour infrared needs a near-infrared band. bandCount includes an alpha band, so an
+          RGB + alpha ortho is 4 bands with nothing to switch to; count colour bands instead. */}
+      {ortho.colourBandCount >= 4 && onComboChange && (
         <Box sx={{ px: 2, py: 1.25, borderBottom: '1px solid', borderColor: 'grey.A800' }}>
           <ToggleButtonGroup
             exclusive
@@ -152,6 +169,7 @@ export default function OrthoOverview({
             onChange={(event, value) => value && onComboChange(value)}
             sx={{
               maxWidth: 360,
+              '& .MuiToggleButton-root': { py: 0.25, fontSize: '0.75rem', lineHeight: 1.6 },
               '& .MuiToggleButton-root.Mui-selected': {
                 color: 'primary.main',
                 bgcolor: 'primary.lighter',
@@ -173,7 +191,30 @@ export default function OrthoOverview({
       {/* Capped at 72% of the window's height (and centred) so a full-width card doesn't
           turn the preview into a page-long image. Width follows the cap, so the aspect
           ratio — which the plot overlay depends on — is kept. */}
-      <Box sx={{ bgcolor: 'grey.50', borderBottom: '1px solid', borderColor: 'grey.A800' }}>
+      <Box sx={{ position: 'relative', bgcolor: 'grey.50', borderBottom: '1px solid', borderColor: 'grey.A800' }}>
+        {/* ---- corner readout ---- */}
+        {/* In the panel's top-left, on the same 16 px edge as the band toggle and the toolbar.
+            Read-only, so it lets clicks and drags through to the preview. */}
+        <Stack direction="row" sx={{ position: 'absolute', top: 12, left: 16, zIndex: 1, gap: 0.75, pointerEvents: 'none' }}>
+          <Box sx={BADGE}>
+            <Box component="span" sx={{ display: 'flex', color: 'text.secondary' }}>
+              <AppstoreOutlined />
+            </Box>
+            <Box component="span" sx={{ fontWeight: 600 }}>
+              {plots.length}
+            </Box>
+            <Box component="span" sx={{ color: 'text.secondary' }}>
+              plots
+            </Box>
+          </Box>
+          {isNudged && (
+            <Box sx={(theme) => ({ ...BADGE(theme), color: 'primary.main', borderColor: 'primary.light' })}>
+              <Box component="span" sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'primary.main' }} />
+              Grid nudged
+            </Box>
+          )}
+        </Stack>
+
         <Box
           tabIndex={disabled ? -1 : 0}
           onKeyDown={handleKeyDown}
@@ -274,29 +315,13 @@ export default function OrthoOverview({
               <CircularProgress size={26} />
             </Box>
           )}
-
-          {/* ---- corner readout ---- */}
-          <Stack direction="row" sx={{ position: 'absolute', top: 10, left: 10, gap: 0.75 }}>
-            <Chip
-              size="small"
-              label={`${plots.length} plots`}
-              sx={{ bgcolor: 'background.paper', color: 'text.primary', fontFamily: 'ui-monospace, monospace' }}
-            />
-            {isNudged && (
-              <Chip
-                size="small"
-                label="grid nudged"
-                sx={{ bgcolor: 'primary.lighter', color: 'primary.main', borderColor: 'primary.light' }}
-              />
-            )}
-          </Stack>
         </Box>
       </Box>
 
       {/* ---- alignment toolbar ---- */}
       <Stack direction="row" sx={{ gap: 1.5, alignItems: 'center', flexWrap: 'wrap', px: 2, py: 1.5 }}>
         <Typography variant="caption" color="text.secondary" sx={{ minWidth: 66 }}>
-          Nudge grid
+          Nudge Grid
         </Typography>
 
         <Stack direction="row" sx={{ gap: 0.25 }}>

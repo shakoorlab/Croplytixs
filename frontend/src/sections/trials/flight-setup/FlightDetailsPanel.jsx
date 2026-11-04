@@ -1,6 +1,9 @@
 import PropTypes from 'prop-types';
+import { useState } from 'react';
+import dayjs from 'dayjs';
 
 // material-ui
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import Box from '@mui/material/Box';
 import Grid from '@mui/material/Grid';
 import Stack from '@mui/material/Stack';
@@ -107,6 +110,15 @@ export default function FlightDetailsPanel({
 }) {
   const set = (key) => (event) => onChange({ ...values, [key]: event.target.value });
 
+  // The page stores the flight date as 'YYYY-MM-DD'; the picker works in dayjs. The
+  // picker's own value lives here so a half-typed date ('2024-12-__') survives the
+  // page storing '' for it — feeding null back in would wipe what was typed.
+  const [dateValue, setDateValue] = useState(() => (values.flightDate ? dayjs(values.flightDate) : null));
+  const handleDateChange = (date) => {
+    setDateValue(date);
+    onChange({ ...values, flightDate: date?.isValid() ? date.format('YYYY-MM-DD') : '' });
+  };
+
   const capture = ALTITUDES.find((a) => a.value === values.capture);
   const captureFit = checkCaptureFit(capture, actualBands);
   const areaAvailable = Number.isFinite(gsdCm) && gsdCm > 0;
@@ -114,27 +126,34 @@ export default function FlightDetailsPanel({
   // The card spans the page, so the three fields sit side by side (stacking on
   // narrow screens) and the upload is a footer row rather than a full-width bar.
   return (
-    <MainCard content={false} sx={NESTED_PANEL} title="Flight details">
+    <MainCard content={false} sx={NESTED_PANEL} title="Flight Details">
       <Box sx={{ px: 2, py: 2 }}>
         <Grid container spacing={2}>
           {/* flight date */}
           <Grid size={{ xs: 12, md: 4 }}>
-            <FormField id="run-flight-date" label="Flight date" required>
-              <TextField
-                id="run-flight-date"
-                size="small"
-                fullWidth
-                type="date"
-                value={values.flightDate}
-                onChange={set('flightDate')}
+            <FormField id="run-flight-date" label="Flight Date" required>
+              <DatePicker
+                value={dateValue}
+                onChange={handleDateChange}
+                format="YYYY-MM-DD"
                 disabled={uploading}
+                slotProps={{
+                  textField: {
+                    id: 'run-flight-date',
+                    size: 'small',
+                    fullWidth: true,
+                    // The label is FormField's, outside the picker, so name the date's
+                    // Year / Month / Day segments with it — MUI X only does this for its own label.
+                    InputProps: { 'aria-labelledby': 'run-flight-date-label' }
+                  }
+                }}
               />
             </FormField>
           </Grid>
 
           {/* altitude / camera */}
           <Grid size={{ xs: 12, md: 4 }}>
-            <FormField id="run-capture" label="Altitude / camera">
+            <FormField id="run-capture" label="Altitude / Camera">
               <TextField
                 id="run-capture"
                 select
@@ -192,7 +211,23 @@ export default function FlightDetailsPanel({
           <Grid size={{ xs: 12, md: 4 }}>
             {/* GSD is only *missing* once something has been staged. Before that it
                 is simply not known yet, so it must not read as a validation error. */}
-            <FormField id="run-gsd" label="Ground sample distance" error={inputsStaged && !areaAvailable}>
+            <FormField
+              id="run-gsd"
+              label="Ground Sample Distance"
+              error={inputsStaged && !areaAvailable}
+              labelAdornment={
+                <InfoTip
+                  label="Where the ground sample distance comes from"
+                  title={
+                    areaAvailable
+                      ? gsdSource
+                      : inputsStaged
+                        ? 'No georeferencing found in the file.'
+                        : 'Read from the orthophoto once it’s added.'
+                  }
+                />
+              }
+            >
               <TextField
                 id="run-gsd"
                 size="small"
@@ -214,13 +249,6 @@ export default function FlightDetailsPanel({
                 error={inputsStaged && !areaAvailable}
               />
             </FormField>
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-              {areaAvailable
-                ? gsdSource
-                : inputsStaged
-                  ? 'No georeferencing found in the file.'
-                  : 'Read from the orthophoto once it’s added.'}
-            </Typography>
 
             {inputsStaged && !areaAvailable && (
               <Alert severity="warning" variant="outlined" sx={{ mt: 1, py: 0.25, '& .MuiAlert-message': { fontSize: '0.75rem' } }}>
