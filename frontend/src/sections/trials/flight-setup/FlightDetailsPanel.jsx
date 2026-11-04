@@ -36,7 +36,7 @@ import WarningOutlined from '@ant-design/icons/WarningOutlined';
 function CaptureExplanation({ capture, fit }) {
   const rows = [
     ['Bands', fit.expected, fit.actual],
-    ['Altitude', `${capture.altitude} m`, 'not in the file']
+    ['Altitude', `${capture.altitude} m`, 'Not in the file']
   ];
 
   return (
@@ -188,7 +188,7 @@ export default function FlightDetailsPanel({
                         <CheckCircleOutlined />
                       </Box>
                     }
-                    label={`orthophoto has ${captureFit.actual} bands, as expected`}
+                    label={`Orthophoto has ${captureFit.actual} bands, as expected`}
                     sx={{ bgcolor: 'success.lighter', color: 'success.main', '& .MuiChip-icon': { color: 'inherit' } }}
                   />
                 ) : (

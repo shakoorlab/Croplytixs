@@ -193,7 +193,7 @@ export default function NewTrialDialog({ open, onClose, onCreate, trials = [], b
           <Stack sx={{ gap: 1 }}>
             <Stack direction="row" sx={{ gap: 1, alignItems: 'baseline' }}>
               <Typography variant="subtitle1">Plot roster</Typography>
-              <Chip size="small" label="optional" sx={{ height: 18, fontSize: '0.7rem', bgcolor: 'grey.100', color: 'text.secondary' }} />
+              <Chip size="small" label="Optional" sx={{ height: 18, fontSize: '0.7rem', bgcolor: 'grey.100', color: 'text.secondary' }} />
             </Stack>
             <Typography variant="caption" color="text.secondary">
               A CSV of <code>plot_id, genotype, rep</code> — your field book or plot map. This is what each flight&apos;s shapefile gets

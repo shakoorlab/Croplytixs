@@ -407,7 +407,7 @@ export default function Reviewer() {
                   {id}
                 </Typography>
                 <Typography variant="caption" color="text.secondary" noWrap>
-                  {plot?.flag ? 'flag' : plot?.audit ? 'audit' : ''}
+                  {plot?.flag ? 'Flag' : plot?.audit ? 'Audit' : ''}
                 </Typography>
                 <Typography variant="body2" sx={{ color: glyphColor, width: 14, textAlign: 'center' }}>
                   {glyph}
@@ -475,7 +475,7 @@ export default function Reviewer() {
                 </ToggleButtonGroup>
                 <Stack direction="row" sx={{ alignItems: 'center', gap: 1, width: 170 }}>
                   <Typography variant="caption" color="text.secondary">
-                    size
+                    Size
                   </Typography>
                   <Slider
                     size="small"
@@ -493,7 +493,7 @@ export default function Reviewer() {
                 </Button>
                 <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
                   <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
-                    opacity
+                    Opacity
                   </Typography>
                   {OPACITIES.map((value, i) => (
                     <Box
@@ -578,13 +578,13 @@ export default function Reviewer() {
               value={`${readout.liveCover.toFixed(1)} %`}
               hint={
                 readout.edited
-                  ? `was ${current.modelCover.toFixed(1)}% before your edit · ${readout.changed} px changed`
-                  : 'model output, unedited'
+                  ? `Was ${current.modelCover.toFixed(1)}% before your edit · ${readout.changed} px changed`
+                  : 'Model output, unedited'
               }
             />
             <Stack direction="row" sx={{ gap: 3 }}>
               <Readout label="Canopy area" value={fmtArea(readout.areaCm2)} />
-              <Readout label="Plot area" value={`${(current.plotAreaCm2 / 10000).toFixed(2)} m²`} hint="polygon, nodata excluded" />
+              <Readout label="Plot area" value={`${(current.plotAreaCm2 / 10000).toFixed(2)} m²`} hint="Polygon, nodata excluded" />
             </Stack>
 
             <Divider />
@@ -612,11 +612,11 @@ export default function Reviewer() {
                 '& .MuiToggleButton-root.Mui-selected': { color: 'primary.main', bgcolor: 'primary.lighter', borderColor: 'primary.light' }
               }}
             >
-              <ToggleButton value="rough">rough fix</ToggleButton>
-              <ToggleButton value="training-grade">training-grade</ToggleButton>
+              <ToggleButton value="rough">Rough fix</ToggleButton>
+              <ToggleButton value="training-grade">Training-grade</ToggleButton>
             </ToggleButtonGroup>
             <Typography variant="caption" color="text.secondary">
-              rough = counts for the number, not for boundary learning
+              Rough = counts for the number, not for boundary learning
             </Typography>
 
             <Divider />

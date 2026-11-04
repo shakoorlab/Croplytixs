@@ -33,8 +33,8 @@ export default function CoverBinBars({ baseline, corrections, height = 220, thin
         xAxis={[{ scaleType: 'band', data: COVER_BINS, tickSize: 0, disableLine: true, categoryGapRatio: 0.45 }]}
         yAxis={[{ tickSize: 0, disableLine: true }]}
         series={[
-          { id: 'baseline', data: baseline, label: 'baseline', stack: 'pool', color: theme.vars.palette.grey[300] },
-          { id: 'new', data: corrections, label: 'new corrections', stack: 'pool', color: theme.vars.palette.primary.main }
+          { id: 'baseline', data: baseline, label: 'Baseline', stack: 'pool', color: theme.vars.palette.grey[300] },
+          { id: 'new', data: corrections, label: 'New corrections', stack: 'pool', color: theme.vars.palette.primary.main }
         ]}
         margin={{ top: 8, right: 8, bottom: 8, left: 8 }}
         sx={{
@@ -46,13 +46,13 @@ export default function CoverBinBars({ baseline, corrections, height = 220, thin
         <Stack direction="row" sx={{ gap: 0.75, alignItems: 'center' }}>
           <Box sx={{ width: 10, height: 10, borderRadius: 0.5, bgcolor: 'grey.300' }} />
           <Typography variant="caption" color="text.secondary">
-            baseline
+            Baseline
           </Typography>
         </Stack>
         <Stack direction="row" sx={{ gap: 0.75, alignItems: 'center' }}>
           <Box sx={{ width: 10, height: 10, borderRadius: 0.5, bgcolor: 'primary.main' }} />
           <Typography variant="caption" color="text.secondary">
-            new corrections
+            New corrections
           </Typography>
         </Stack>
         {thin.length > 0 && (

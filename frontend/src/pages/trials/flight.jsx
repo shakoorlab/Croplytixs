@@ -8,7 +8,6 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
-import Link from '@mui/material/Link';
 import LinearProgress from '@mui/material/LinearProgress';
 import OutlinedInput from '@mui/material/OutlinedInput';
 import InputAdornment from '@mui/material/InputAdornment';
@@ -22,39 +21,24 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 
 // project imports
-import MainCard from 'components/MainCard';
 import PageHeader from 'components/PageHeader';
 import StatTile from 'components/StatTile';
 import TrialTabs from 'sections/trials/TrialTabs';
 import QcChip from 'sections/trials/QcChip';
-import FlightStatusChip from 'sections/trials/FlightStatusChip';
-import MapCopies from 'sections/trials/MapCopies';
-import { NESTED_PANEL, NESTED_PANEL_FRAMED } from 'sections/trials/surfaces';
-import { formatBytes } from 'sections/trials/flight-setup/utils';
+import FlightSummary from 'sections/trials/FlightSummary';
+import FlightProgress from 'sections/trials/FlightProgress';
+import { NESTED_PANEL_FRAMED } from 'sections/trials/surfaces';
 import { useFlight, useTrial } from 'api/trials';
-import { apiDownload } from 'api/client';
-import { MODELS } from 'api/models';
-import LifecycleChip from 'sections/models/LifecycleChip';
 import formatRelative from 'utils/formatRelative';
 
 // assets
 import SearchOutlined from '@ant-design/icons/SearchOutlined';
 import PlayCircleOutlined from '@ant-design/icons/PlayCircleOutlined';
-import LoadingOutlined from '@ant-design/icons/LoadingOutlined';
 import ArrowLeftOutlined from '@ant-design/icons/ArrowLeftOutlined';
-import CheckCircleOutlined from '@ant-design/icons/CheckCircleOutlined';
 
 const mono = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.8125rem' };
 const cell = { ...mono, whiteSpace: 'nowrap' };
 const NONE = [];
-
-// What the results panel says while the flight has no per-plot results to list.
-const WAITING = {
-  uploaded: 'Uploaded · waiting for the processing worker',
-  queued: 'Queued · waiting for the processing worker',
-  complete: 'Processing complete',
-  failed: 'This run failed'
-};
 
 const FILTERS = [
   { key: 'all', label: 'All' },
@@ -62,20 +46,6 @@ const FILTERS = [
   { key: 'edited', label: 'Corrected' },
   { key: 'rejected', label: 'Rejected' }
 ];
-
-function Row({ label, children, mono: isMono = false }) {
-  return (
-    <Stack
-      direction="row"
-      sx={{ gap: 2, py: 0.75, borderBottom: '1px solid', borderColor: 'divider', '&:last-of-type': { borderBottom: 0 } }}
-    >
-      <Typography variant="caption" color="text.secondary" sx={{ width: 118, flexShrink: 0, pt: 0.25 }}>
-        {label}
-      </Typography>
-      <Box sx={{ flex: 1, minWidth: 0, ...(isMono && mono) }}>{children}</Box>
-    </Stack>
-  );
-}
 
 // ==============================|| TRIALS - FLIGHT DETAIL ||============================== //
 
@@ -93,7 +63,6 @@ export default function FlightDetail() {
 
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
-  const [downloadError, setDownloadError] = useState(null);
 
   // The flights API carries no per-plot results yet; `results` arrives with
   // `GET …/flights/{fid}/results`. Until then the panel shows the status instead.
@@ -156,7 +125,6 @@ export default function FlightDetail() {
     );
   }
 
-  const model = flight ? MODELS.find((candidate) => candidate.id === flight.modelId || candidate.label === flight.model) : null;
   const openReviewer = (plotId) =>
     navigate(`/trials/${trialId}/review/session?flight=${flightId}&queue=all${plotId ? `&plot=${plotId}` : ''}`);
 
@@ -168,7 +136,7 @@ export default function FlightDetail() {
           title={flight ? `Flight ${flight.flightDate}` : error ? 'Could not load flight' : 'Loading flight…'}
           subtitle={
             flight
-              ? `${flight.captureLabel || flight.capture} · ${flight.source === 'ortho' ? 'ortho + .shp' : 'pre-clipped'} · ${flight.plots} plots · ${flight.createdBy || 'unknown'} · ${formatRelative(flight.createdAt)}`
+              ? `${flight.captureLabel || flight.capture} · ${flight.source === 'ortho' ? 'Ortho + .shp' : 'Pre-clipped'} · ${flight.plots} plots · ${flight.createdBy || 'Unknown'} · ${formatRelative(flight.createdAt)}`
               : undefined
           }
           actions={
@@ -200,183 +168,15 @@ export default function FlightDetail() {
 
           {flight && (
             <Grid container rowSpacing={2.5} columnSpacing={2.75}>
-              {/* ---- manifest ---- */}
-              <Grid size={{ xs: 12, lg: 4 }}>
-                <MainCard title="Run manifest" sx={NESTED_PANEL} contentSX={{ pt: 1 }}>
-                  <Row label="Status">
-                    <Stack direction="row" sx={{ gap: 1, alignItems: 'center' }}>
-                      <FlightStatusChip status={flight.status} />
-                      {flight.status === 'running' && (
-                        <>
-                          <LinearProgress variant="determinate" value={flight.progress} sx={{ width: 90, height: 3 }} />
-                          <Typography variant="caption" color="text.secondary">
-                            {flight.progress}%
-                          </Typography>
-                        </>
-                      )}
-                      {flight.status === 'failed' && flight.error && (
-                        <Typography variant="caption" color="error.main">
-                          {flight.error}
-                        </Typography>
-                      )}
-                    </Stack>
-                  </Row>
-                  <Row label="Flight date" mono>
-                    {flight.flightDate}
-                    {flight.dap != null && (
-                      <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-                        {flight.dap} DAP
-                      </Typography>
-                    )}
-                  </Row>
-                  <Row label="Capture">{flight.captureLabel || flight.capture}</Row>
-                  <Row label="Model">
-                    {flight.model ? (
-                      <>
-                        <Stack direction="row" sx={{ gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                          <Box component="span" sx={mono}>
-                            {flight.model}
-                          </Box>
-                          {model && <LifecycleChip status={model.status} />}
-                        </Stack>
-                        <Typography variant="caption" color="text.secondary">
-                          pinned for this run · re-running with another version creates a parallel result set
-                        </Typography>
-                      </>
-                    ) : (
-                      <Typography variant="body2" color="text.secondary">
-                        Not chosen yet · picked when the flight is run
-                      </Typography>
-                    )}
-                  </Row>
-                  {flight.ortho && (
-                    <Row label="Orthophoto">
-                      <Typography variant="body2" sx={mono} noWrap>
-                        {flight.ortho.name}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {[
-                          flight.ortho.bytes && formatBytes(flight.ortho.bytes),
-                          flight.ortho.width && `${flight.ortho.width} × ${flight.ortho.height} px`,
-                          flight.ortho.bandCount && `${flight.ortho.bandCount}-band`,
-                          flight.ortho.gsdCm && `${flight.ortho.gsdCm} cm/px`,
-                          flight.ortho.crs
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </Typography>
-                    </Row>
-                  )}
-                  {flight.source === 'ortho' && (
-                    <Row label="Map copies">
-                      {/* keyed so a message about one flight doesn't follow you to the next */}
-                      <MapCopies key={flight.id} trialId={trialId} flight={flight} onChanged={mutate} />
-                    </Row>
-                  )}
-                  {flight.shapefile && (
-                    <Row label="Plot shapefile">
-                      <Typography variant="body2" sx={mono} noWrap>
-                        {flight.shapefile.name}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {[
-                          flight.shapefile.members?.join(' '),
-                          flight.shapefile.featureCount && `${flight.shapefile.featureCount} polygons`,
-                          flight.shapefile.crs
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </Typography>
-                    </Row>
-                  )}
-                  {flight.filenamePattern && (
-                    <Row label="Filename pattern" mono>
-                      {flight.filenamePattern}
-                    </Row>
-                  )}
-                  {flight.offset && (
-                    <Row label="Grid offset" mono>
-                      dx {flight.offset.dxCm >= 0 ? '+' : ''}
-                      {flight.offset.dxCm} cm · dy {flight.offset.dyCm >= 0 ? '+' : ''}
-                      {flight.offset.dyCm} cm · rot {flight.offset.rotDeg}°{flight.insetCm != null && ` · inset ${flight.insetCm} cm`}
-                    </Row>
-                  )}
-                  {flight.mapping && Object.keys(flight.mapping).length > 0 && (
-                    <Row label="Attribute map" mono>
-                      {['plot_id', 'row', 'col', 'genotype', 'rep']
-                        .filter((key) => flight.mapping[key])
-                        .map((key) => `${key} ← ${flight.mapping[key]}`)
-                        .join(' · ') || '—'}
-                    </Row>
-                  )}
-                  <Row label="Denominator">
-                    {flight.denominator === 'polygon' && 'Polygon area · nodata corners excluded'}
-                    {flight.denominator === 'clip' && 'Full clip extent'}
-                    {!flight.denominator && (
-                      <Typography variant="body2" color="text.secondary">
-                        Not chosen yet · picked when the flight is run
-                      </Typography>
-                    )}
-                  </Row>
-                  <Row label="Created" mono>
-                    {flight.createdBy || '—'} · {new Date(flight.createdAt).toLocaleString()}
-                  </Row>
-                  {flight.files?.length > 0 && (
-                    <Row label="Stored files">
-                      <Stack sx={{ gap: 0.25 }}>
-                        {flight.files.map((file) => (
-                          <Link
-                            key={file.key}
-                            component="button"
-                            type="button"
-                            onClick={() => {
-                              setDownloadError(null);
-                              apiDownload(
-                                `/api/trials/${trialId}/flights/${flightId}/files/${file.role}/${encodeURIComponent(file.name)}`,
-                                file.name
-                              ).catch((error) => setDownloadError(`Couldn’t download ${file.name}: ${error.message}`));
-                            }}
-                            variant="caption"
-                            underline="hover"
-                            sx={{ ...mono, wordBreak: 'break-all', textAlign: 'left' }}
-                          >
-                            {file.role}/{file.name} · {formatBytes(file.bytes)}
-                          </Link>
-                        ))}
-                        {downloadError && (
-                          <Typography variant="caption" color="error" role="alert">
-                            {downloadError}
-                          </Typography>
-                        )}
-                      </Stack>
-                    </Row>
-                  )}
-                </MainCard>
+              {/* ---- what this flight is: on top, full width ---- */}
+              <Grid size={12}>
+                <FlightSummary trialId={trialId} flight={flight} onChanged={mutate} />
               </Grid>
 
-              {/* ---- results ---- */}
-              <Grid size={{ xs: 12, lg: 8 }}>
+              {/* ---- results, or how far the flight is from having them ---- */}
+              <Grid size={12}>
                 {!summary ? (
-                  <Stack sx={(theme) => ({ ...NESTED_PANEL_FRAMED(theme), alignItems: 'center', gap: 1.5, py: 8, px: 3 })}>
-                    <Box sx={{ fontSize: '2rem', color: 'text.disabled', display: 'flex' }}>
-                      {flight.status === 'complete' ? <CheckCircleOutlined /> : <LoadingOutlined spin={flight.status === 'running'} />}
-                    </Box>
-                    <Typography variant="subtitle1">
-                      {flight.status === 'running'
-                        ? `Clipping and segmenting · ${flight.progress}%`
-                        : WAITING[flight.status] || `Status: ${flight.status}`}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" align="center" sx={{ maxWidth: 460 }}>
-                      {flight.status === 'failed' && (flight.error || 'No error detail recorded.')}
-                      {flight.status === 'complete' &&
-                        'The API does not serve per-plot results yet. They will be listed here once it does.'}
-                      {!['failed', 'complete'].includes(flight.status) &&
-                        'Per-plot masks, fractional cover and canopy area land here when inference finishes. Nothing to do until then.'}
-                    </Typography>
-                    {flight.status === 'running' && (
-                      <LinearProgress variant="determinate" value={flight.progress} sx={{ width: 240, height: 4, mt: 1 }} />
-                    )}
-                  </Stack>
+                  <FlightProgress flight={flight} />
                 ) : (
                   <Stack sx={{ gap: 2 }}>
                     <Stack direction="row" sx={{ gap: 1.5, flexWrap: 'wrap' }}>

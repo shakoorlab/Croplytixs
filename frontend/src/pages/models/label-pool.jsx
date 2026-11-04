@@ -34,8 +34,8 @@ const mono = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fon
 
 const SOURCE = {
   'qc-correction': { label: 'QC correction', color: 'primary' },
-  audit: { label: 'audit stream', color: 'info' },
-  imported: { label: 'imported', color: 'secondary' }
+  audit: { label: 'Audit stream', color: 'info' },
+  imported: { label: 'Imported', color: 'secondary' }
 };
 
 // ==============================|| MODELS - LABEL POOL ||============================== //
@@ -117,9 +117,9 @@ export default function LabelPool() {
                 hint="QC corrections polished for boundaries"
                 color="primary.main"
               />
-              <StatTile label="Rough" value={pool.totals.rough} hint="count for the number, excluded from training" />
-              <StatTile label="Audit sample" value={pool.totals.audit} hint="auto-passed plots, unbiased" />
-              <StatTile label="Benchmark" value={pool.totals.benchmark} hint="frozen · never trains" />
+              <StatTile label="Rough" value={pool.totals.rough} hint="Count for the number, excluded from training" />
+              <StatTile label="Audit sample" value={pool.totals.audit} hint="Auto-passed plots, unbiased" />
+              <StatTile label="Benchmark" value={pool.totals.benchmark} hint="Frozen · never trains" />
             </Stack>
 
             <Grid container rowSpacing={2.5} columnSpacing={2.75}>

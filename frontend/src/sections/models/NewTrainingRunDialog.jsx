@@ -95,8 +95,8 @@ export default function NewTrainingRunDialog({ open, onClose, pool, onQueued }) 
                 '& .MuiToggleButton-root.Mui-selected': { color: 'primary.main', bgcolor: 'primary.lighter', borderColor: 'primary.light' }
               }}
             >
-              <ToggleButton value="fine-tune">fine-tune</ToggleButton>
-              <ToggleButton value="scratch">from scratch</ToggleButton>
+              <ToggleButton value="fine-tune">Fine-tune</ToggleButton>
+              <ToggleButton value="scratch">From scratch</ToggleButton>
             </ToggleButtonGroup>
           </Stack>
 

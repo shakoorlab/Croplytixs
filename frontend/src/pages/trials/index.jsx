@@ -168,9 +168,9 @@ export default function TrialsLobby() {
                       {trial.flagged > 0 ? (
                         <Chip size="small" label={`${trial.flagged} flagged`} sx={{ bgcolor: 'warning.lighter', color: 'warning.main' }} />
                       ) : trial.expected ? (
-                        <Chip size="small" label="clear" sx={{ bgcolor: 'success.lighter', color: 'success.main' }} />
+                        <Chip size="small" label="Clear" sx={{ bgcolor: 'success.lighter', color: 'success.main' }} />
                       ) : (
-                        <Chip size="small" label="no flights" sx={{ bgcolor: 'grey.100', color: 'text.secondary' }} />
+                        <Chip size="small" label="No flights" sx={{ bgcolor: 'grey.100', color: 'text.secondary' }} />
                       )}
                     </TableCell>
                     <TableCell>

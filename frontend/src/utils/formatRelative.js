@@ -8,7 +8,7 @@ export default function formatRelative(iso) {
   if (Number.isNaN(date.getTime())) return iso;
 
   const seconds = Math.round((Date.now() - date.getTime()) / 1000);
-  if (seconds < 60) return 'just now';
+  if (seconds < 60) return 'Just now';
   if (seconds < 3600) return `${Math.round(seconds / 60)} min ago`;
   if (seconds < 86400) return `${Math.round(seconds / 3600)} h ago`;
 

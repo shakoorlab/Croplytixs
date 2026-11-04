@@ -23,12 +23,12 @@ import formatRelative from 'utils/formatRelative';
 const mono = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.8125rem' };
 
 export const RUN_STATUS = {
-  queued: { label: 'queued', color: 'secondary' },
-  running: { label: 'running', color: 'primary' },
-  complete: { label: 'complete', color: 'warning' },
-  promoted: { label: 'promoted', color: 'success' },
-  rejected: { label: 'rejected', color: 'error' },
-  failed: { label: 'failed', color: 'error' }
+  queued: { label: 'Queued', color: 'secondary' },
+  running: { label: 'Running', color: 'primary' },
+  complete: { label: 'Complete', color: 'warning' },
+  promoted: { label: 'Promoted', color: 'success' },
+  rejected: { label: 'Rejected', color: 'error' },
+  failed: { label: 'Failed', color: 'error' }
 };
 
 // ==============================|| MODELS - TRAINING RUNS ||============================== //

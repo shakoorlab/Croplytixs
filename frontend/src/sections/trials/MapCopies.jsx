@@ -9,14 +9,13 @@ import Link from '@mui/material/Link';
 // project imports
 import { rerunIngest } from 'api/trials';
 import { formatBytes } from 'sections/trials/flight-setup/utils';
-
-const mono = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.8125rem' };
+import capitalize from 'utils/capitalize';
 
 const LABEL = {
-  queued: 'queued',
-  running: 'building…',
-  complete: 'ready',
-  failed: 'failed'
+  queued: 'Queued',
+  running: 'Building…',
+  complete: 'Ready',
+  failed: 'Failed'
 };
 
 // ==============================|| TRIALS - MAP COPIES (INGEST) ||============================== //
@@ -48,36 +47,21 @@ export default function MapCopies({ trialId, flight, onChanged }) {
 
   const action = (label, onClick) => (
     <Link component="button" type="button" variant="caption" underline="hover" onClick={onClick} disabled={busy} sx={{ ml: 1 }}>
-      {busy ? 'starting…' : label}
+      {busy ? 'Starting…' : label}
     </Link>
   );
 
-  const raster = ingest?.raster;
   return (
     <Stack sx={{ gap: 0.25 }}>
       <Typography variant="body2" component="div">
-        {ingest ? LABEL[ingest.state] || ingest.state : 'not built'}
+        {ingest ? LABEL[ingest.state] || capitalize(ingest.state) : 'Not built'}
         {inFlight && action('Refresh', () => onChanged())}
         {(!ingest || ingest.state === 'failed') && action(ingest ? 'Retry' : 'Build', rebuild)}
       </Typography>
       {ingest?.state === 'complete' && (
-        <>
-          <Typography variant="caption" color="text.secondary" sx={mono}>
-            view · {formatBytes(ingest.view.bytes)} {ingest.view.compression} · lossless · {formatBytes(ingest.cog.bytes)}
-          </Typography>
-          {raster && (
-            <Typography variant="caption" color="text.secondary">
-              {[
-                `${raster.width} × ${raster.height} px`,
-                `${raster.bandCount}-band ${raster.dtype}`,
-                raster.crs,
-                raster.gsdCm && `${raster.gsdCm} cm/px`
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </Typography>
-          )}
-        </>
+        <Typography variant="caption" color="text.secondary" component="div">
+          Viewing copy {formatBytes(ingest.view.bytes)} · Full-quality copy {formatBytes(ingest.cog.bytes)}
+        </Typography>
       )}
       {ingest?.state === 'failed' && ingest.error && (
         <Typography variant="caption" color="error.main">

@@ -188,7 +188,7 @@ export default function TrialTraits() {
                           v2.3-rc1
                         </Box>
                         <Typography variant="caption" color="text.secondary">
-                          not run on this trial — re-run from Models creates a parallel set
+                          Not run on this trial — re-run from Models creates a parallel set
                         </Typography>
                       </Stack>
                     </MenuItem>
@@ -233,14 +233,14 @@ export default function TrialTraits() {
                   <Stack>
                     <Typography variant="subtitle1">Growth dynamics</Typography>
                     <Typography variant="caption" color="text.secondary">
-                      mean of QC-accepted plots per genotype · {selected.length ? `${selected.length} selected` : 'top 8 by final cover'} ·
+                      Mean of QC-accepted plots per genotype · {selected.length ? `${selected.length} selected` : 'top 8 by final cover'} ·
                       click a row to highlight
                     </Typography>
                   </Stack>
                   <Box sx={{ flex: 1 }} />
                   <FormControlLabel
                     control={<Switch size="small" checked={showAll} onChange={(event) => setShowAll(event.target.checked)} />}
-                    label={<Typography variant="caption">all genotypes</Typography>}
+                    label={<Typography variant="caption">All genotypes</Typography>}
                   />
                   {selected.length > 0 && (
                     <Button size="small" color="secondary" onClick={() => setSelected([])}>
@@ -258,7 +258,7 @@ export default function TrialTraits() {
                 <Stack>
                   <Typography variant="subtitle1">Derived traits</Typography>
                   <Typography variant="caption" color="text.secondary">
-                    per genotype, from the accepted series · ranked by final cover
+                    Per genotype, from the accepted series · ranked by final cover
                   </Typography>
                 </Stack>
                 <Box sx={{ flex: 1 }} />

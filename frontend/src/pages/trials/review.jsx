@@ -217,14 +217,14 @@ export default function TrialReview() {
                 <StatTile
                   label="Flagged"
                   value={summary.flaggedTotal}
-                  hint="model asked for a second look"
+                  hint="Model asked for a second look"
                   onClick={() => setFilter('flagged')}
                   active={filter === 'flagged'}
                 />
                 <StatTile
                   label="Audit sample"
                   value={summary.audit}
-                  hint="random auto-passed plots"
+                  hint="Random auto-passed plots"
                   onClick={() => setFilter('audit')}
                   active={filter === 'audit'}
                 />
@@ -333,7 +333,7 @@ export default function TrialReview() {
                           )}
                         </Stack>
                         <Typography variant="caption" noWrap sx={{ color: plot.flag ? 'warning.main' : 'text.secondary' }}>
-                          {plot.flag ? FLAG_LABELS[plot.flag] : `confidence ${plot.confidence.toFixed(2)}`}
+                          {plot.flag ? FLAG_LABELS[plot.flag] : `Confidence ${plot.confidence.toFixed(2)}`}
                         </Typography>
                       </Stack>
                     </Grid>

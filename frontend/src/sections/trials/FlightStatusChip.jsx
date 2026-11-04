@@ -6,6 +6,7 @@ import Tooltip from '@mui/material/Tooltip';
 
 // project imports
 import { FLIGHT_STATUSES } from 'api/trials';
+import capitalize from 'utils/capitalize';
 
 const COLORS = {
   uploaded: 'secondary',
@@ -25,7 +26,11 @@ export default function FlightStatusChip({ status, size = 'small', sx }) {
   const color = COLORS[status] || 'secondary';
   return (
     <Tooltip title={FLIGHT_STATUSES[status] || ''}>
-      <Chip size={size} label={status || 'unknown'} sx={{ bgcolor: `${color}.lighter`, color: `${color}.main`, ...sx }} />
+      <Chip
+        size={size}
+        label={status ? capitalize(status) : 'Unknown'}
+        sx={{ bgcolor: `${color}.lighter`, color: `${color}.main`, ...sx }}
+      />
     </Tooltip>
   );
 }

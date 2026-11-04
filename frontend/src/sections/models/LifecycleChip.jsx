@@ -6,6 +6,7 @@ import Tooltip from '@mui/material/Tooltip';
 
 // project imports
 import { LIFECYCLE } from 'api/models';
+import capitalize from 'utils/capitalize';
 
 const COLORS = {
   draft: 'secondary',
@@ -26,7 +27,7 @@ export default function LifecycleChip({ status, size = 'small', sx }) {
     <Tooltip title={index >= 0 ? `Lifecycle: ${LIFECYCLE.map((step, i) => (i === index ? `[${step}]` : step)).join(' → ')}` : ''}>
       <Chip
         size={size}
-        label={status}
+        label={capitalize(status)}
         sx={{
           bgcolor: `${color}.lighter`,
           color: `${color}.main`,

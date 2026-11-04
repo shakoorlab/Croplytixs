@@ -19,9 +19,9 @@ import PlusOutlined from '@ant-design/icons/PlusOutlined';
 import DownOutlined from '@ant-design/icons/DownOutlined';
 
 const IMPORTS = [
-  { key: 'label-studio', label: 'Label Studio JSON', hint: 'brush RLE export — the format the pilot labels are in' },
-  { key: 'coco', label: 'COCO segmentation', hint: 'polygons; rasterised to the clip grid on import' },
-  { key: 'png', label: 'PNG masks + clips', hint: 'one binary mask per plot image, paired by stem' }
+  { key: 'label-studio', label: 'Label Studio JSON', hint: 'Brush RLE export — the format the pilot labels are in' },
+  { key: 'coco', label: 'COCO segmentation', hint: 'Polygons; rasterised to the clip grid on import' },
+  { key: 'png', label: 'PNG masks + clips', hint: 'One binary mask per plot image, paired by stem' }
 ];
 
 // ==============================|| MODELS - PAGE HEADER ||============================== //

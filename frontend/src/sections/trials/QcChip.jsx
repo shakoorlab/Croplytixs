@@ -4,10 +4,10 @@ import PropTypes from 'prop-types';
 import Chip from '@mui/material/Chip';
 
 const STYLES = {
-  pending: { label: 'needs review', color: 'warning' },
-  accepted: { label: 'accepted', color: 'success' },
-  rejected: { label: 'rejected', color: 'error' },
-  passed: { label: 'auto-passed', color: 'secondary' }
+  pending: { label: 'Needs review', color: 'warning' },
+  accepted: { label: 'Accepted', color: 'success' },
+  rejected: { label: 'Rejected', color: 'error' },
+  passed: { label: 'Auto-passed', color: 'secondary' }
 };
 
 // ==============================|| TRIALS - QC STATUS CHIP ||============================== //
@@ -15,8 +15,8 @@ const STYLES = {
 export default function QcChip({ qc, edited = false, audit = false, size = 'small', sx }) {
   const style = STYLES[qc] || STYLES.passed;
   let label = style.label;
-  if (qc === 'accepted' && edited) label = 'corrected';
-  if (qc === 'pending' && audit) label = 'audit sample';
+  if (qc === 'accepted' && edited) label = 'Corrected';
+  if (qc === 'pending' && audit) label = 'Audit sample';
   return (
     <Chip
       size={size}

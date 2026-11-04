@@ -130,7 +130,7 @@ export default function TrainingRunDetail() {
     <Grid container rowSpacing={2.5} columnSpacing={2.75}>
       <Grid size={12}>
         <ModelsHeader
-          crumbs={[{ label: 'Training runs', to: '/models/runs' }, { label: `run #${run.number}` }]}
+          crumbs={[{ label: 'Training runs', to: '/models/runs' }, { label: `Run #${run.number}` }]}
           title={`Run #${run.number} · ${run.version}`}
           subtitle={`${run.mode}${run.base ? ` from ${run.base}` : ''} · started by ${run.startedBy} · ${run.durationMin} min on ${run.hardware}`}
           actions={
@@ -265,7 +265,7 @@ export default function TrainingRunDetail() {
                     <Fact label="Base model">
                       <Stack direction="row" sx={{ gap: 1, alignItems: 'center' }}>
                         <Box component="span" sx={mono}>
-                          {run.base || 'none'}
+                          {run.base || 'None'}
                         </Box>
                         <Typography variant="caption" color="text.secondary">
                           {run.mode}

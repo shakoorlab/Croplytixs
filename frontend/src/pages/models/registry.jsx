@@ -135,7 +135,7 @@ export default function ModelRegistry() {
                         {model.status === 'evaluated' && model.note && (
                           <Tooltip title={model.note}>
                             <Typography variant="caption" color="text.secondary">
-                              pilot
+                              Pilot
                             </Typography>
                           </Tooltip>
                         )}

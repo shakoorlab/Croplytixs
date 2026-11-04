@@ -117,7 +117,7 @@ export default function GrowthCurves({ series, selected = [], topN = 8, showAll 
           {
             data: lines.x,
             scaleType: 'linear',
-            label: 'days after planting',
+            label: 'Days after planting',
             min: Math.max(0, lines.x[0] - 3),
             max: lines.x[lines.x.length - 1] + 3,
             valueFormatter: (value) => `${Math.round(value)}`,
@@ -125,7 +125,7 @@ export default function GrowthCurves({ series, selected = [], topN = 8, showAll 
             disableLine: true
           }
         ]}
-        yAxis={[{ min: 0, max: 100, label: 'fractional cover (%)', valueFormatter: (value) => `${value}`, tickSize: 6, disableLine: true }]}
+        yAxis={[{ min: 0, max: 100, label: 'Fractional cover (%)', valueFormatter: (value) => `${value}`, tickSize: 6, disableLine: true }]}
         series={lines.series.map((line) => ({ ...line, valueFormatter: (value) => (value == null ? '—' : `${value.toFixed(1)}%`) }))}
         margin={{ top: 16, right: 24, bottom: 8, left: 8 }}
         slotProps={{ tooltip: { trigger: 'item' } }}

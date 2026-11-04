@@ -72,7 +72,7 @@ export default function Benchmark() {
                     <Chip
                       size="small"
                       icon={<LockOutlined />}
-                      label={bench.superseded ? 'frozen · superseded' : 'frozen'}
+                      label={bench.superseded ? 'Frozen · superseded' : 'Frozen'}
                       sx={{ bgcolor: 'info.lighter', color: 'info.main' }}
                     />
                     <Typography variant="caption" color="text.secondary">
@@ -87,7 +87,7 @@ export default function Benchmark() {
                     <StatTile label="Dates" value={bench.strata.dates.length} hint={bench.strata.dates.join(' · ')} />
                     <StatTile label="Altitudes" value={bench.strata.altitudes.length} hint={bench.strata.altitudes.join(' · ')} />
                     <StatTile label="Per cover bin" value={bench.strata.bins.join(' / ')} hint={COVER_BINS.join(' · ')} />
-                    <StatTile label="Genotypes" value={bench.strata.genotypes} hint="stratified, no plot shared with training" />
+                    <StatTile label="Genotypes" value={bench.strata.genotypes} hint="Stratified, no plot shared with training" />
                   </Stack>
 
                   <TableContainer

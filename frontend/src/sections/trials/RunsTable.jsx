@@ -73,14 +73,14 @@ export default function RunsTable({ runs = [], highlightId = null, onOpenRun, on
       <Table size="small">
         <TableHead>
           <TableRow>
-            <TableCell>Flight</TableCell>
-            <TableCell>Capture</TableCell>
-            <TableCell>Source</TableCell>
-            <TableCell align="right">Plots</TableCell>
-            <TableCell>Model</TableCell>
-            <TableCell>Status</TableCell>
-            <TableCell>Needs review</TableCell>
-            <TableCell align="right">Mean cover</TableCell>
+            <TableCell align="center">Flight</TableCell>
+            <TableCell align="center">Capture</TableCell>
+            <TableCell align="center">Source</TableCell>
+            <TableCell align="center">Plots</TableCell>
+            <TableCell align="center">Model</TableCell>
+            <TableCell align="center">Status</TableCell>
+            <TableCell align="center">Needs review</TableCell>
+            <TableCell align="center">Mean cover</TableCell>
             <TableCell align="right" />
           </TableRow>
         </TableHead>
@@ -94,25 +94,29 @@ export default function RunsTable({ runs = [], highlightId = null, onOpenRun, on
                 onClick={() => onOpenRun?.(run)}
                 sx={{ cursor: onOpenRun ? 'pointer' : 'default' }}
               >
-                <TableCell sx={{ ...mono, fontWeight: 600 }}>{run.flightDate}</TableCell>
-                <TableCell sx={mono}>{run.captureLabel || run.capture}</TableCell>
-                <TableCell>
+                <TableCell align="center" sx={{ ...mono, fontWeight: 600 }}>
+                  {run.flightDate}
+                </TableCell>
+                <TableCell align="center" sx={mono}>
+                  {run.captureLabel || run.capture}
+                </TableCell>
+                <TableCell align="center">
                   <Typography variant="caption" color="text.secondary">
-                    {run.source === 'ortho' ? 'ortho + .shp' : 'pre-clipped'}
+                    {run.source === 'ortho' ? 'Ortho + .shp' : 'Pre-clipped'}
                   </Typography>
                 </TableCell>
-                <TableCell sx={mono} align="right">
+                <TableCell sx={mono} align="center">
                   {run.plots}
                 </TableCell>
-                <TableCell sx={mono}>
+                <TableCell sx={mono} align="center">
                   {run.model || (
                     <Typography variant="caption" color="text.disabled">
-                      not chosen
+                      Not chosen
                     </Typography>
                   )}
                 </TableCell>
-                <TableCell>
-                  <Stack direction="row" sx={{ gap: 0.75, alignItems: 'center' }}>
+                <TableCell align="center">
+                  <Stack direction="row" sx={{ gap: 0.75, alignItems: 'center', justifyContent: 'center' }}>
                     <FlightStatusChip status={run.status} />
                     {run.status === 'failed' && run.error && (
                       <Tooltip title={run.error}>
@@ -123,10 +127,10 @@ export default function RunsTable({ runs = [], highlightId = null, onOpenRun, on
                     )}
                   </Stack>
                   {run.status === 'running' && (
-                    <LinearProgress variant="determinate" value={run.progress} sx={{ mt: 0.75, width: 84, height: 3 }} />
+                    <LinearProgress variant="determinate" value={run.progress} sx={{ mt: 0.75, mx: 'auto', width: 84, height: 3 }} />
                   )}
                 </TableCell>
-                <TableCell>
+                <TableCell align="center">
                   {run.flagged == null ? (
                     <Typography variant="caption" color="text.disabled">
                       —
@@ -135,11 +139,11 @@ export default function RunsTable({ runs = [], highlightId = null, onOpenRun, on
                     <Chip size="small" label={`${run.flagged} flagged`} sx={{ bgcolor: 'warning.lighter', color: 'warning.main' }} />
                   ) : (
                     <Typography variant="caption" color="success.main">
-                      clear
+                      Clear
                     </Typography>
                   )}
                 </TableCell>
-                <TableCell sx={mono} align="right">
+                <TableCell sx={mono} align="center">
                   {run.meanCover == null ? '—' : `${run.meanCover.toFixed(1)}%`}
                 </TableCell>
                 <TableCell align="right" onClick={(event) => event.stopPropagation()}>
