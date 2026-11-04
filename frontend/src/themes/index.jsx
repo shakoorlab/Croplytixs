@@ -6,6 +6,7 @@ import { createTheme, StyledEngineProvider, ThemeProvider } from '@mui/material/
 import CssBaseline from '@mui/material/CssBaseline';
 
 // project imports
+import config from 'config';
 import useConfig from 'hooks/useConfig';
 import CustomShadows from './custom-shadows';
 import componentsOverride from './overrides';
@@ -17,7 +18,10 @@ import Typography from './typography';
 export default function ThemeCustomization({ children }) {
   const { state } = useConfig();
 
-  const themeTypography = useMemo(() => Typography(state.fontFamily), [state.fontFamily]);
+  // The font comes from config.js, not the stored config: ConfigProvider saves its
+  // whole state to localStorage on first load, so reading it from there would pin
+  // every returning browser to whatever font was the default on their first visit.
+  const themeTypography = useMemo(() => Typography(config.fontFamily), []);
 
   const palette = useMemo(() => buildPalette(state.presetColor), [state.presetColor]);
 

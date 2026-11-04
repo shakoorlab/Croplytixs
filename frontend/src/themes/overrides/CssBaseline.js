@@ -7,6 +7,12 @@ export default function CssBaseline(theme) {
   return {
     MuiCssBaseline: {
       styleOverrides: {
+        // Stand-in for Inter while its files load (see config.js): the system's
+        // Arial or Helvetica, so text is readable at once instead of invisible.
+        '@font-face': {
+          fontFamily: 'Inter Fallback',
+          src: "local('Arial'), local('ArialMT'), local('Liberation Sans'), local('Helvetica')"
+        },
         /**
          * Global type scale.
          *
