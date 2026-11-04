@@ -41,6 +41,7 @@ import formatRelative from 'utils/formatRelative';
 import SearchOutlined from '@ant-design/icons/SearchOutlined';
 import PlayCircleOutlined from '@ant-design/icons/PlayCircleOutlined';
 import LoadingOutlined from '@ant-design/icons/LoadingOutlined';
+import ArrowLeftOutlined from '@ant-design/icons/ArrowLeftOutlined';
 import CheckCircleOutlined from '@ant-design/icons/CheckCircleOutlined';
 
 const mono = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.8125rem' };
@@ -116,11 +117,20 @@ export default function FlightDetail() {
     { label: trial?.name || trialId, to: `/trials/${trialId}` }
   ];
 
+  // Straight to the trial's Flights table, not history.back(): a flight opened from a
+  // shared link has no table behind it. The Flights tab can't do this — it is already
+  // the selected tab here, and a tab only navigates when you switch to another one.
+  const backToFlights = (
+    <Button size="small" color="secondary" startIcon={<ArrowLeftOutlined />} onClick={() => navigate(`/trials/${trialId}`)}>
+      Back to Flights
+    </Button>
+  );
+
   if (trialError) {
     return (
       <Grid container rowSpacing={2.5}>
         <Grid size={12}>
-          <PageHeader crumbs={crumbs} title="Could not load trial" />
+          <PageHeader crumbs={crumbs} title="Could not load trial" actions={backToFlights} />
         </Grid>
         <Grid size={12}>
           <Alert severity="error" variant="outlined">
@@ -135,7 +145,7 @@ export default function FlightDetail() {
     return (
       <Grid container rowSpacing={2.5}>
         <Grid size={12}>
-          <PageHeader crumbs={crumbs} title="Flight not found" />
+          <PageHeader crumbs={crumbs} title="Flight not found" actions={backToFlights} />
         </Grid>
         <Grid size={12}>
           <Alert severity="warning" variant="outlined">
@@ -162,16 +172,19 @@ export default function FlightDetail() {
               : undefined
           }
           actions={
-            flight?.status === 'complete' ? (
-              <Button
-                variant="contained"
-                startIcon={<PlayCircleOutlined />}
-                onClick={() => navigate(`/trials/${trialId}/review?flight=${flightId}`)}
-                color={flight.flagged ? 'primary' : 'secondary'}
-              >
-                {flight.flagged ? `Review ${flight.flagged} flagged` : 'Open in Review'}
-              </Button>
-            ) : null
+            <Stack direction="row" sx={{ gap: 1, alignItems: 'center' }}>
+              {backToFlights}
+              {flight?.status === 'complete' && (
+                <Button
+                  variant="contained"
+                  startIcon={<PlayCircleOutlined />}
+                  onClick={() => navigate(`/trials/${trialId}/review?flight=${flightId}`)}
+                  color={flight.flagged ? 'primary' : 'secondary'}
+                >
+                  {flight.flagged ? `Review ${flight.flagged} flagged` : 'Open in Review'}
+                </Button>
+              )}
+            </Stack>
           }
         />
       </Grid>
