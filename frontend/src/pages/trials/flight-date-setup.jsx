@@ -23,13 +23,13 @@ import FileDropCard from 'sections/trials/flight-setup/FileDropCard';
 import OrthoOverview from 'sections/trials/flight-setup/OrthoOverview';
 import ShapefileMapping from 'sections/trials/flight-setup/ShapefileMapping';
 import PreClippedTable from 'sections/trials/flight-setup/PreClippedTable';
-import RunConfigPanel from 'sections/trials/flight-setup/RunConfigPanel';
+import FlightDetailsPanel from 'sections/trials/flight-setup/FlightDetailsPanel';
 import { formatBytes, inspectShapefileSelection } from 'sections/trials/flight-setup/utils';
-import { ALTITUDES, checkModelFit } from 'sections/trials/flight-setup/constants';
+import { ALTITUDES } from 'sections/trials/flight-setup/constants';
 import { readOrtho, releaseOrtho } from 'sections/trials/flight-setup/geo/readOrtho';
 import { readShapefile } from 'sections/trials/flight-setup/geo/readShapefile';
 import { gridCoverage, toOverviewPlots } from 'sections/trials/flight-setup/geo/toOverviewPlots';
-import { DEFAULT_FILENAME_PATTERN, MOCK_CLIPPED_FILES, MOCK_MODELS } from 'sections/trials/flight-setup/mockData';
+import { DEFAULT_FILENAME_PATTERN, MOCK_CLIPPED_FILES } from 'sections/trials/flight-setup/mockData';
 
 // assets
 import PictureOutlined from '@ant-design/icons/PictureOutlined';
@@ -95,17 +95,16 @@ export default function FlightDateSetup() {
   // --- pre-clipped mode ----------------------------------------------------
   const [pattern, setPattern] = useState(DEFAULT_FILENAME_PATTERN);
 
-  // --- run -----------------------------------------------------------------
+  // --- flight details + upload ----------------------------------------------
+  // Only facts about the flight. The model and area denominator are chosen when
+  // the flight is run, not when its files arrive.
   const [config, setConfig] = useState({
     flightDate: '',
-    capture: '12-ms',
-    modelId: MOCK_MODELS[0].id,
-    denominator: 'polygon'
+    capture: '12-ms'
   });
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [submitError, setSubmitError] = useState(null);
-  const [created, setCreated] = useState(null); // the flight record the API returned
 
   const isOrthoMode = sourceMode === 'ortho';
   const hasGrid = Boolean(ortho && shapefile);
@@ -126,16 +125,6 @@ export default function FlightDateSetup() {
   // fine and then lands nowhere near the imagery, so this is a hard stop.
   const crsAgree = hasGrid && (shapefile.coordinateSpace === 'wgs84' ? Boolean(ortho.epsg) : Number(ortho.epsg) === Number(shapefile.epsg));
 
-  const modelFit = useMemo(
-    () =>
-      checkModelFit(
-        MOCK_MODELS.find((m) => m.id === config.modelId),
-        ALTITUDES.find((a) => a.value === config.capture),
-        isOrthoMode ? ortho?.colourBandCount : null
-      ),
-    [config.modelId, config.capture, isOrthoMode, ortho]
-  );
-
   const blockers = useMemo(() => {
     const list = [];
     if (isOrthoMode) {
@@ -154,7 +143,6 @@ export default function FlightDateSetup() {
       list.push('No plot images staged.');
     }
     if (!config.flightDate) list.push('Flight date is not set.');
-    if (!modelFit.fits) list.push('Selected model does not match this capture.');
     return list;
   }, [
     isOrthoMode,
@@ -168,18 +156,16 @@ export default function FlightDateSetup() {
     coverage,
     mapping,
     clipped,
-    config.flightDate,
-    modelFit.fits
+    config.flightDate
   ]);
 
-  /**
-   * Polygon area is only definable when polygons exist, so switching to
-   * pre-clipped images has to drop the denominator back to the clip extent.
-   */
-  const handleSourceMode = (value) => {
-    setSourceMode(value);
-    setConfig((current) => ({ ...current, denominator: value === 'ortho' ? 'polygon' : 'clip' }));
-  };
+  // What the Upload button is about to send, shown under it.
+  const uploadSummary = useMemo(() => {
+    const files = isOrthoMode ? [ortho?.file, ...(shapefile?.files || [])].filter(Boolean) : clipped?.files || [];
+    if (!files.length) return null;
+    const bytes = files.reduce((sum, file) => sum + file.size, 0);
+    return `${formatBytes(bytes)} · ${files.length} file${files.length === 1 ? '' : 's'}${plotCount ? ` · ${plotCount} plots` : ''}`;
+  }, [isOrthoMode, ortho, shapefile, clipped, plotCount]);
 
   // ---- real decode --------------------------------------------------------
   // Everything the panel shows about the ortho — band count, CRS, GSD, the
@@ -227,7 +213,12 @@ export default function FlightDateSetup() {
   };
 
   const handleShapefileSelect = async (fileList) => {
-    const inspection = inspectShapefileSelection(fileList);
+    // Copy the files out *now*. A FileList is live: the drop card clears its
+    // input as soon as it has handed the list over, which empties this same
+    // object, so anything read from it after an `await` comes back empty — and
+    // the upload then went out with no shapefile parts at all.
+    const files = Array.from(fileList);
+    const inspection = inspectShapefileSelection(files);
     setShapefileError(inspection.error);
     if (!inspection.ok) {
       setShapefile(null);
@@ -237,8 +228,8 @@ export default function FlightDateSetup() {
 
     setShapefileBusy(true);
     try {
-      const next = await readShapefile(fileList);
-      next.files = Array.from(fileList); // the parsed view is for the screen; the bytes still go to the API
+      const next = await readShapefile(files);
+      next.files = files; // the parsed view is for the screen; the bytes still go to the API
       setShapefile(next);
       // pre-select the mapping from the real attribute names
       setMapping(guessMapping(next.fields));
@@ -280,26 +271,21 @@ export default function FlightDateSetup() {
   const flightsUrl = `/trials/${trialId}/flights`;
 
   /**
-   * Upload = one multipart POST: a JSON `meta` part describing the flight and
-   * the run configuration, plus the raw files. The API streams the files into
-   * the bucket and writes one flight record. Progress here is *upload* progress
-   * (bytes leaving the browser) — the clip + inference job that turns
-   * `uploaded` into `complete` is the next backend slice and will report
-   * its own progress on the flight record.
+   * Upload = one multipart POST: a JSON `meta` part describing the flight, plus
+   * the raw files. The API streams the files into the bucket, writes one flight
+   * record and starts ingest. Progress here is *upload* progress (bytes leaving
+   * the browser). On success the user goes back to the Flights table, where the
+   * new flight is highlighted; everything after this happens from its own page.
    */
-  const handleRun = async () => {
+  const handleUpload = async () => {
     const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => obj?.[k] !== undefined).map((k) => [k, obj[k]]));
     const captureOption = ALTITUDES.find((a) => a.value === config.capture);
-    const model = MOCK_MODELS.find((m) => m.id === config.modelId);
 
     const meta = {
       flightDate: config.flightDate,
       source: sourceMode,
       capture: config.capture,
       captureLabel: captureOption?.label,
-      modelId: config.modelId,
-      modelLabel: model?.label,
-      denominator: config.denominator,
       plots: plotCount,
       offset,
       insetCm,
@@ -310,7 +296,6 @@ export default function FlightDateSetup() {
     };
 
     setSubmitError(null);
-    setCreated(null);
     setProgress(0);
     setRunning(true);
     try {
@@ -324,10 +309,10 @@ export default function FlightDateSetup() {
         },
         { onProgress: setProgress }
       );
-      setCreated(flight);
-      // the runs page may already hold a cached list — invalidate it so the new
-      // flight shows up without a reload
+      // the Flights tab may already hold a cached list — refetch it so the new
+      // flight is in the table it is about to show
       mutate(flightsKey(trialId));
+      navigate(flightsUrl, { state: { uploaded: { id: flight.id, flightDate: flight.flightDate, source: flight.source } } });
     } catch (error) {
       setSubmitError(error.message);
       setRunning(false);
@@ -370,7 +355,7 @@ export default function FlightDateSetup() {
                   exclusive
                   size="small"
                   value={sourceMode}
-                  onChange={(event, value) => value && handleSourceMode(value)}
+                  onChange={(event, value) => value && setSourceMode(value)}
                   disabled={running}
                   sx={{
                     '& .MuiToggleButton-root.Mui-selected': {
@@ -532,23 +517,19 @@ export default function FlightDateSetup() {
             {/* ---- right rail ---- */}
             <Grid size={{ xs: 12, lg: 4 }}>
               <Stack sx={{ gap: 2 }}>
-                <RunConfigPanel
+                <FlightDetailsPanel
                   values={config}
                   onChange={setConfig}
-                  models={MOCK_MODELS}
                   gsdCm={isOrthoMode ? ortho?.gsdCm : undefined}
                   gsdSource={isOrthoMode ? 'from ortho transform' : 'from GeoTIFF transform'}
-                  plotCount={plotCount}
-                  estimate={isOrthoMode ? 'clip ~4 min · infer ~8 min' : 'infer ~8 min'}
-                  running={running}
+                  uploading={running}
                   progress={progress}
-                  canRun={blockers.length === 0}
+                  canUpload={blockers.length === 0}
                   blockers={blockers}
-                  allowPolygonArea={isOrthoMode}
                   inputsStaged={isOrthoMode ? Boolean(ortho) : Boolean(clipped)}
                   actualBands={isOrthoMode ? ortho?.colourBandCount : null}
-                  runLabel={isOrthoMode ? `Clip & run · ${plotCount} plots` : `Run · ${plotCount} plots`}
-                  onRun={handleRun}
+                  uploadSummary={uploadSummary}
+                  onUpload={handleUpload}
                   onOverrideGsd={() => {
                     // opens a dialog collecting altitude + sensor + focal length
                   }}
@@ -557,20 +538,6 @@ export default function FlightDateSetup() {
                 {submitError && (
                   <Alert severity="error" variant="outlined" onClose={() => setSubmitError(null)}>
                     {submitError}
-                  </Alert>
-                )}
-
-                {created && (
-                  <Alert
-                    severity="success"
-                    variant="outlined"
-                    action={
-                      <Button size="small" color="inherit" onClick={() => navigate(flightsUrl)}>
-                        View flights
-                      </Button>
-                    }
-                  >
-                    Flight {created.flightDate} uploaded — {created.files?.length || 0} file{created.files?.length === 1 ? '' : 's'} stored.
                   </Alert>
                 )}
               </Stack>

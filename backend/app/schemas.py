@@ -58,7 +58,11 @@ class FlightMeta(BaseModel):
     """Everything the upload page knows *about* the flight, sent as one JSON
     field alongside the files. Extra keys (ortho band count, shapefile fields…)
     are kept verbatim: `extra="allow"` means the page can add detail without a
-    backend deploy."""
+    backend deploy.
+
+    The model and the area denominator are *processing* choices, made when a
+    flight is run rather than when its files arrive, so an upload may leave
+    them out. Flights uploaded with them keep them."""
 
     model_config = ConfigDict(extra="allow")
 
@@ -66,9 +70,9 @@ class FlightMeta(BaseModel):
     source: Literal["ortho", "clipped"]
     capture: str  # e.g. "12-ms" — the code from ALTITUDES in constants.js
     captureLabel: str | None = None  # e.g. "12 m · MS"
-    modelId: str
+    modelId: str | None = None
     modelLabel: str | None = None
-    denominator: Literal["polygon", "clip"] = "polygon"
+    denominator: Literal["polygon", "clip"] | None = None
     plots: int = Field(default=0, ge=0)
     offset: GridOffset = GridOffset()
     insetCm: float = 0
@@ -117,8 +121,8 @@ class Flight(BaseModel):
     source: str
     capture: str
     plots: int
-    model: str
-    modelId: str
+    model: str | None = None  # None until a model is chosen to process the flight
+    modelId: str | None = None
     status: Literal["uploaded", "queued", "running", "complete", "failed"]
     progress: int = 0
     flagged: int | None = None

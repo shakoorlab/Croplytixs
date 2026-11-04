@@ -218,15 +218,23 @@ export default function FlightDetail() {
                   </Row>
                   <Row label="Capture">{flight.captureLabel || flight.capture}</Row>
                   <Row label="Model">
-                    <Stack direction="row" sx={{ gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <Box component="span" sx={mono}>
-                        {flight.model}
-                      </Box>
-                      {model && <LifecycleChip status={model.status} />}
-                    </Stack>
-                    <Typography variant="caption" color="text.secondary">
-                      pinned for this run · re-running with another version creates a parallel result set
-                    </Typography>
+                    {flight.model ? (
+                      <>
+                        <Stack direction="row" sx={{ gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <Box component="span" sx={mono}>
+                            {flight.model}
+                          </Box>
+                          {model && <LifecycleChip status={model.status} />}
+                        </Stack>
+                        <Typography variant="caption" color="text.secondary">
+                          pinned for this run · re-running with another version creates a parallel result set
+                        </Typography>
+                      </>
+                    ) : (
+                      <Typography variant="body2" color="text.secondary">
+                        Not chosen yet · picked when the flight is run
+                      </Typography>
+                    )}
                   </Row>
                   {flight.ortho && (
                     <Row label="Orthophoto">
@@ -289,7 +297,13 @@ export default function FlightDetail() {
                     </Row>
                   )}
                   <Row label="Denominator">
-                    {flight.denominator === 'polygon' ? 'Polygon area · nodata corners excluded' : 'Full clip extent'}
+                    {flight.denominator === 'polygon' && 'Polygon area · nodata corners excluded'}
+                    {flight.denominator === 'clip' && 'Full clip extent'}
+                    {!flight.denominator && (
+                      <Typography variant="body2" color="text.secondary">
+                        Not chosen yet · picked when the flight is run
+                      </Typography>
+                    )}
                   </Row>
                   <Row label="Created" mono>
                     {flight.createdBy || '—'} · {new Date(flight.createdAt).toLocaleString()}

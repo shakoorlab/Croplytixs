@@ -1,8 +1,9 @@
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 
 // material-ui
 import Box from '@mui/material/Box';
 import Grid from '@mui/material/Grid';
+import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
@@ -22,6 +23,11 @@ import PlusOutlined from '@ant-design/icons/PlusOutlined';
 export default function TrialRuns() {
   const { trialId } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Set by the upload page when it sends the user back here. Held in history
+  // state, so a reload of this entry still shows it until it is dismissed.
+  const uploaded = location.state?.uploaded;
+  const dismissUploaded = () => navigate(location.pathname, { replace: true, state: null });
 
   const { data: trial, error: trialError, isLoading: trialLoading } = useTrial(trialId);
   // Status, flag count and mean cover are the flight record's own; until the
@@ -102,12 +108,33 @@ export default function TrialRuns() {
               Could not load flights — {runsError.message}
             </Alert>
           )}
+          {uploaded && (
+            <Alert
+              severity="success"
+              variant="outlined"
+              sx={{ mb: 2 }}
+              action={
+                <Stack direction="row" sx={{ gap: 0.5 }}>
+                  <Button color="inherit" size="small" onClick={() => navigate(`/trials/${trial.id}/flights/${uploaded.id}`)}>
+                    Open
+                  </Button>
+                  <Button color="inherit" size="small" onClick={dismissUploaded}>
+                    Dismiss
+                  </Button>
+                </Stack>
+              }
+            >
+              Flight {uploaded.flightDate} uploaded.
+              {uploaded.source === 'ortho' && ' Its map copies are being built; open it to follow along.'}
+            </Alert>
+          )}
           {runsLoading && <LinearProgress sx={{ height: 2, mb: 2 }} />}
 
           {/* only once the list has arrived — "No flights yet" is a claim, not a placeholder */}
           {runs && (
             <RunsTable
               runs={runs}
+              highlightId={uploaded?.id}
               onNewRun={goToUpload}
               onOpenRun={(run) => navigate(`/trials/${trial.id}/flights/${run.id}`)}
               onReviewRun={(run) => navigate(`/trials/${trial.id}/review?flight=${run.id}`)}

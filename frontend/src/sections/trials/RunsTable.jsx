@@ -49,7 +49,7 @@ const frame = (theme) => ({
  * a breeder coming back on Monday wants to know how many plots owe them
  * attention, not what percentage of the batch has finished processing.
  */
-export default function RunsTable({ runs = [], onOpenRun, onReviewRun, onNewRun }) {
+export default function RunsTable({ runs = [], highlightId = null, onOpenRun, onReviewRun, onNewRun }) {
   if (!runs.length) {
     return (
       <Stack sx={(theme) => ({ ...frame(theme), alignItems: 'center', gap: 1.5, py: 8, px: 3 })}>
@@ -87,7 +87,13 @@ export default function RunsTable({ runs = [], onOpenRun, onReviewRun, onNewRun 
         <TableBody>
           {runs.map((run) => {
             return (
-              <TableRow key={run.id} hover onClick={() => onOpenRun?.(run)} sx={{ cursor: onOpenRun ? 'pointer' : 'default' }}>
+              <TableRow
+                key={run.id}
+                hover
+                selected={run.id === highlightId}
+                onClick={() => onOpenRun?.(run)}
+                sx={{ cursor: onOpenRun ? 'pointer' : 'default' }}
+              >
                 <TableCell sx={{ ...mono, fontWeight: 600 }}>{run.flightDate}</TableCell>
                 <TableCell sx={mono}>{run.captureLabel || run.capture}</TableCell>
                 <TableCell>
@@ -98,7 +104,13 @@ export default function RunsTable({ runs = [], onOpenRun, onReviewRun, onNewRun 
                 <TableCell sx={mono} align="right">
                   {run.plots}
                 </TableCell>
-                <TableCell sx={mono}>{run.model}</TableCell>
+                <TableCell sx={mono}>
+                  {run.model || (
+                    <Typography variant="caption" color="text.disabled">
+                      not chosen
+                    </Typography>
+                  )}
+                </TableCell>
                 <TableCell>
                   <Stack direction="row" sx={{ gap: 0.75, alignItems: 'center' }}>
                     <FlightStatusChip status={run.status} />
@@ -148,6 +160,7 @@ export default function RunsTable({ runs = [], onOpenRun, onReviewRun, onNewRun 
 
 RunsTable.propTypes = {
   runs: PropTypes.array,
+  highlightId: PropTypes.string,
   onOpenRun: PropTypes.func,
   onReviewRun: PropTypes.func,
   onNewRun: PropTypes.func

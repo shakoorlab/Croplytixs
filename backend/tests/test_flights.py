@@ -12,7 +12,7 @@ def test_create_ortho_flight_stores_every_file(client, trial, store):
     assert flight["id"].startswith("flt_")
     assert flight["status"] == "uploaded"
     assert flight["model"] == "cc-v1"  # falls back to modelId when no label given
-    assert flight["denominator"] == "polygon"  # default filled in by FlightMeta
+    assert flight["denominator"] is None  # a processing choice; not sent, not invented
 
     roles = sorted((f["role"], f["name"]) for f in flight["files"])
     assert roles == [("ortho", "field.tif"), ("shapefile", "plots.prj"), ("shapefile", "plots.shp")]
@@ -21,6 +21,18 @@ def test_create_ortho_flight_stores_every_file(client, trial, store):
     for f in flight["files"]:
         assert f["key"].startswith(f"trials/{trial['id']}/flights/{flight['id']}/")
         assert store.exists(f["key"])
+
+
+def test_upload_needs_no_model_or_denominator(client, trial):
+    # The upload page no longer asks for either; they're chosen when the flight is run.
+    data, files = ortho_flight_parts()
+    meta = json.loads(data["meta"])
+    meta.pop("modelId")
+    r = client.post(f"/api/trials/{trial['id']}/flights", data={"meta": json.dumps(meta)}, files=files)
+    assert r.status_code == 201, r.text
+    flight = r.json()
+    assert flight["model"] is None and flight["modelId"] is None and flight["denominator"] is None
+    assert client.get(f"/api/trials/{trial['id']}/flights").status_code == 200  # the list still validates
 
 
 def test_trial_stats_derive_from_flights(client, trial):

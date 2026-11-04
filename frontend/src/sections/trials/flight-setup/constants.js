@@ -29,6 +29,9 @@ export const DENOMINATORS = [
  * returns a plausible-looking mask with wrong numbers, which is far worse. So
  * this is a hard block on the run, not a warning, and the same derivation feeds
  * both the message in the panel and the page's `canRun`.
+ *
+ * The upload page no longer picks a model (nor a DENOMINATOR): both are chosen
+ * when a flight is run, and that step is where this check belongs.
  */
 export function checkModelFit(model, capture, actualBands = null) {
   if (!model || !capture) return { fits: true, reasons: [] };
@@ -49,4 +52,16 @@ export function checkModelFit(model, capture, actualBands = null) {
   }
 
   return { fits: reasons.length === 0, reasons };
+}
+
+/**
+ * Does the orthophoto look like the capture the user picked? Only the band count
+ * can be read from the file (an alpha band excluded); altitude can't, so that is
+ * the setting's word. A mismatch warns instead of blocking: a 4-band R,G,B,NIR
+ * sensor has no option in ALTITUDES yet, and its flights still have to upload.
+ * Returns null until there is a file to compare.
+ */
+export function checkCaptureFit(capture, actualBands) {
+  if (!capture || !Number.isFinite(actualBands) || actualBands <= 0) return null;
+  return { fits: capture.bands === actualBands, expected: capture.bands, actual: actualBands };
 }
