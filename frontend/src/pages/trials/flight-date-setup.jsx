@@ -516,7 +516,8 @@ export default function FlightDateSetup() {
 
             {/* ---- right rail ---- */}
             <Grid size={{ xs: 12, lg: 4 }}>
-              <Stack sx={{ gap: 2 }}>
+              {/* full height of the row, so the details card can match the left column */}
+              <Stack sx={{ gap: 2, height: '100%' }}>
                 <FlightDetailsPanel
                   values={config}
                   onChange={setConfig}

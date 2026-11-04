@@ -111,7 +111,12 @@ export default function FlightDetailsPanel({
   const areaAvailable = Number.isFinite(gsdCm) && gsdCm > 0;
 
   return (
-    <MainCard content={false} sx={NESTED_PANEL} title="Flight details">
+    // Fills the rail, so the card runs as long as the column of boxes beside it.
+    <MainCard
+      content={false}
+      sx={(theme) => ({ ...NESTED_PANEL(theme), flex: 1, display: 'flex', flexDirection: 'column' })}
+      title="Flight details"
+    >
       <Stack sx={{ px: 2, py: 2, gap: 2 }}>
         {/* flight date */}
         <FormField id="run-flight-date" label="Flight date" required>
@@ -213,7 +218,8 @@ export default function FlightDetailsPanel({
         </Box>
       </Stack>
 
-      <Divider />
+      {/* auto margin: the upload sits at the card's foot, level with the end of the left column */}
+      <Divider sx={{ mt: 'auto' }} />
 
       {/* upload */}
       <Box sx={{ px: 2, py: 2 }}>
