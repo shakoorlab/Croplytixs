@@ -16,6 +16,7 @@ import LinearProgress from '@mui/material/LinearProgress';
 // project imports
 import MainCard from 'components/MainCard';
 import FormField from 'components/FormField';
+import InfoTip from 'components/InfoTip';
 import { NESTED_PANEL } from 'sections/trials/surfaces';
 import { ALTITUDES, DENOMINATORS, checkModelFit } from './constants';
 
@@ -23,6 +24,69 @@ import { ALTITUDES, DENOMINATORS, checkModelFit } from './constants';
 import PlayCircleOutlined from '@ant-design/icons/PlayCircleOutlined';
 import CheckCircleOutlined from '@ant-design/icons/CheckCircleOutlined';
 import WarningOutlined from '@ant-design/icons/WarningOutlined';
+
+/**
+ * What the green "matches" chip compared, for its (i). Before an orthophoto is
+ * read the band count can only come from the Altitude / camera setting, and the
+ * chip's wording alone makes that look like a check of the file (see
+ * checkModelFit in ./constants). Altitude is always the setting's.
+ */
+function FitExplanation({ model, capture, actualBands }) {
+  const fromFile = Number.isFinite(actualBands) && actualBands > 0;
+  const rows = [
+    ['Bands', model.bands, fromFile ? actualBands : capture.bands, fromFile ? 'this orthophoto' : 'the setting'],
+    ['Altitude', `${model.altitude} m`, `${capture.altitude} m`, 'the setting']
+  ];
+
+  return (
+    <Stack sx={{ gap: 1 }}>
+      <Typography variant="subtitle2" component="p">
+        How this is checked
+      </Typography>
+      <Typography variant="caption" component="p" color="text.secondary">
+        {fromFile
+          ? 'The band count comes from the orthophoto you added. An alpha band isn’t counted.'
+          : `No orthophoto has been read yet, so the model is compared with the Altitude / camera setting (${capture.label}). Once an orthophoto is read, its own band count replaces the setting.`}
+      </Typography>
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: 'auto auto 1fr',
+          columnGap: 1.5,
+          rowGap: 0.5,
+          fontVariantNumeric: 'tabular-nums',
+          '& .head': { color: 'text.secondary', fontSize: '0.6875rem', textTransform: 'uppercase', letterSpacing: '0.06em' }
+        }}
+      >
+        <span className="head" />
+        <span className="head">Model</span>
+        <span className="head">Input</span>
+        {rows.map(([label, expected, actual, source]) => (
+          <Box key={label} sx={{ display: 'contents' }}>
+            <Typography variant="caption" color="text.secondary">
+              {label}
+            </Typography>
+            <Typography variant="caption">{expected}</Typography>
+            <Typography variant="caption">
+              <Box component="span" sx={{ color: 'success.main', mr: 0.5 }}>
+                {actual}
+              </Box>
+              <Box component="span" sx={{ color: 'text.secondary' }}>
+                from {source}
+              </Box>
+            </Typography>
+          </Box>
+        ))}
+      </Box>
+    </Stack>
+  );
+}
+
+FitExplanation.propTypes = {
+  model: PropTypes.object.isRequired,
+  capture: PropTypes.object.isRequired,
+  actualBands: PropTypes.number
+};
 
 // ==============================|| FLIGHT SETUP - RUN CONFIG PANEL ||============================== //
 
@@ -125,16 +189,24 @@ export default function RunConfigPanel({
 
           <Box sx={{ mt: 1 }}>
             {modelFits ? (
-              <Chip
-                size="small"
-                icon={
-                  <Box sx={{ display: 'flex', fontSize: '0.75rem' }}>
-                    <CheckCircleOutlined />
-                  </Box>
-                }
-                label={`matches ${actualBands || capture?.bands}-band input`}
-                sx={{ bgcolor: 'success.lighter', color: 'success.main', '& .MuiChip-icon': { color: 'inherit' } }}
-              />
+              <Stack direction="row" sx={{ gap: 0.5, alignItems: 'center' }}>
+                <Chip
+                  size="small"
+                  icon={
+                    <Box sx={{ display: 'flex', fontSize: '0.75rem' }}>
+                      <CheckCircleOutlined />
+                    </Box>
+                  }
+                  label={`matches ${actualBands || capture?.bands}-band input`}
+                  sx={{ bgcolor: 'success.lighter', color: 'success.main', '& .MuiChip-icon': { color: 'inherit' } }}
+                />
+                {model && capture && (
+                  <InfoTip
+                    label="How this match is checked"
+                    title={<FitExplanation model={model} capture={capture} actualBands={actualBands} />}
+                  />
+                )}
+              </Stack>
             ) : (
               <Alert
                 severity="error"
