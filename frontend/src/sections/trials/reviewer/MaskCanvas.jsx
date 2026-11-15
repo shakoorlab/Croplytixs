@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import Box from '@mui/material/Box';
 
 // project imports
-import { renderPlot } from 'api/demo';
+import { renderPlot } from 'sections/trials/plotPixels';
 import { CANOPY_TINT } from 'sections/trials/PlotThumb';
 import { paintDisc, paintStroke } from './maskTools';
 

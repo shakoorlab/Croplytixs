@@ -18,7 +18,7 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Alert from '@mui/material/Alert';
 
 // project imports
-import { coverOf, plotLayers, predictedMask, useDemoBundle } from 'api/demo';
+import { coverOf, plotLayers, predictedMask } from 'sections/trials/plotPixels';
 import { FLAG_LABELS, useTrialResults } from 'api/results';
 import { recordDecision } from 'api/labels';
 import PlotThumb, { EDIT_TINT } from 'sections/trials/PlotThumb';
@@ -112,7 +112,8 @@ export default function Reviewer() {
   const navigate = useNavigate();
 
   const { trial, flights, anchorId, isLoading, error } = useTrialResults(trialId);
-  const { data: bundle } = useDemoBundle();
+  // Per-plot imagery comes with results from the API; until then there are no plots to draw.
+  const bundle = null;
 
   const flightId = params.get('flight') || anchorId;
   const mode = params.get('queue') || 'queue';

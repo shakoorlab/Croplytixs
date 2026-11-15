@@ -24,7 +24,6 @@ import TrialTabs from 'sections/trials/TrialTabs';
 import PlotThumb from 'sections/trials/PlotThumb';
 import QcChip from 'sections/trials/QcChip';
 import { NESTED_PANEL_FRAMED } from 'sections/trials/surfaces';
-import { useDemoBundle } from 'api/demo';
 import { FLAG_LABELS, useTrialResults } from 'api/results';
 
 // assets
@@ -70,7 +69,8 @@ export default function TrialReview() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const { trial, flights, anchorId, isLoading, error, trialError } = useTrialResults(trialId);
-  const { data: bundle } = useDemoBundle();
+  // Per-plot imagery comes with results from the API; until then there are no plots to draw.
+  const bundle = null;
 
   const [filter, setFilter] = useState('queue');
   const [reason, setReason] = useState(null);

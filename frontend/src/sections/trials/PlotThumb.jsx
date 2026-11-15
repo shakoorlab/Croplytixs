@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import Box from '@mui/material/Box';
 
 // project imports
-import { plotLayers, predictedMask, renderPlot } from 'api/demo';
+import { plotLayers, predictedMask, renderPlot } from 'sections/trials/plotPixels';
 
 export const CANOPY_TINT = [140, 245, 66];
 export const EDIT_TINT = [46, 224, 138];
@@ -13,7 +13,7 @@ export const EDIT_TINT = [46, 224, 138];
 // ==============================|| TRIALS - PLOT THUMBNAIL ||============================== //
 
 /**
- * One plot clip with its mask tinted over it, drawn from the demo atlas.
+ * One plot clip with its mask tinted over it.
  *
  * The canvas is sized in *native* pixels times an integer scale and then laid
  * out at the CSS width asked for, so a thumbnail never resamples twice: once

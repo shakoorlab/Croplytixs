@@ -23,9 +23,6 @@ import MainCard from 'components/MainCard';
 import PageHeader from 'components/PageHeader';
 import NewTrialDialog from 'sections/trials/NewTrialDialog';
 import { createTrial, useTrials } from 'api/trials';
-import { enrichTrialRow } from 'api/results';
-import { useLabelStore } from 'api/labels';
-import { useDemoBundle } from 'api/demo';
 import formatRelative from 'utils/formatRelative';
 
 // assets
@@ -47,8 +44,6 @@ const mono = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fon
 export default function TrialsLobby() {
   const navigate = useNavigate();
   const { data: trials, error, isLoading, mutate } = useTrials();
-  const labelStore = useLabelStore();
-  const { data: bundle } = useDemoBundle();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState(null);
@@ -68,9 +63,9 @@ export default function TrialsLobby() {
     }
   };
 
-  // The processed / flagged columns follow the same stand-in the trial
-  // workspace uses until the worker writes real counts (see api/results).
-  const rows = (trials || []).map((trial) => enrichTrialRow(trial, labelStore, bundle));
+  // Every column is the API's own: processed, expected and flagged are derived
+  // from the trial's flights on the server, so this list agrees with the trial.
+  const rows = trials || [];
 
   return (
     <Grid container rowSpacing={2.5} columnSpacing={2.75}>
