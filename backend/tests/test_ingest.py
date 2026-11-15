@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-import json
 
 import numpy as np
 import pytest
@@ -12,7 +11,7 @@ from rasterio.transform import from_origin
 from app import jobs
 from app.ingest import build_lossless, build_view, ingest_flight, main, natural_colour_bands
 from app.settings import settings
-from tests.conftest import ortho_flight_parts
+from tests.conftest import start_flight, upload_flight
 
 # UTM 20N, Guadeloupe — the CRS of the Roujol A sample, at its 2.3 cm/px.
 CRS = "EPSG:32620"
@@ -113,19 +112,23 @@ def test_fully_valid_source_gets_no_mask(tmp_path):
 # ---------------------------------------------------------------------------
 # one flight, through the store and the repo
 # ---------------------------------------------------------------------------
-def stored_flight(repo, store, tmp_path, ortho_bytes: bytes, name="field.tif"):
-    key = f"trials/t1/flights/flt_1/ortho/{name}"
+def stored_flight(repo, store, tmp_path, ortho_bytes: bytes, name="field.tif", prefix=None):
+    """A flight as the API leaves it after `complete`. Without `prefix` it is one
+    from before accounts, whose files sit under trials/ and that has no storagePrefix."""
+    key = f"{prefix or 'trials/t1/flights/flt_1'}/ortho/{name}"
     store.put(key, io.BytesIO(ortho_bytes))
-    repo.create_flight(
-        {
-            "id": "flt_1",
-            "trialId": "t1",
-            "flightDate": "2026-08-20",
-            "createdAt": "2026-08-20T12:00:00+00:00",
-            "files": [{"role": "ortho", "name": name, "bytes": len(ortho_bytes), "key": key}],
-            "ingest": jobs.queued(),
-        }
-    )
+    doc = {
+        "id": "flt_1",
+        "trialId": "t1",
+        "flightDate": "2026-08-20",
+        "createdAt": "2026-08-20T12:00:00+00:00",
+        "files": [{"role": "ortho", "name": name, "bytes": len(ortho_bytes), "key": key}],
+        "ingest": jobs.queued(),
+    }
+    if prefix:
+        doc.update(accountId="a1", trialKey="a1:t1", storagePrefix=prefix)
+    repo.create_flight(doc)
+    return key
 
 
 def test_ingest_flight_writes_both_cogs_and_records_where_the_ortho_sits(repo, store, tmp_path):
@@ -133,7 +136,8 @@ def test_ingest_flight_writes_both_cogs_and_records_where_the_ortho_sits(repo, s
     record = ingest_flight("flt_1", repo, store)
 
     assert record["state"] == "complete", record
-    assert repo.get_flight("flt_1")["ingest"] == record
+    assert repo.get_flight_unscoped("flt_1")["ingest"] == record
+    assert record["readFrom"] == "copy"
     assert record["queuedAt"] and record["startedAt"] and record["finishedAt"]
     for part, compression in (("cog", "DEFLATE"), ("view", "WEBP")):
         assert record[part]["key"] == f"trials/t1/flights/flt_1/derived/{part}.tif"
@@ -144,6 +148,37 @@ def test_ingest_flight_writes_both_cogs_and_records_where_the_ortho_sits(repo, s
     assert raster["epsg"] == 32620 and raster["gsdCm"] == 2.3
     lon_min, lat_min, lon_max, lat_max = raster["lonLatBounds"]
     assert -62 < lon_min < lon_max < -61 and 16 < lat_min < lat_max < 16.2
+
+
+def test_outputs_go_under_the_flights_own_prefix(repo, store, tmp_path):
+    prefix = "accounts/a1/trials/t1/flights/flt_1"
+    stored_flight(repo, store, tmp_path, write_rgba(tmp_path / "o.tif").read_bytes(), prefix=prefix)
+    record = ingest_flight("flt_1", repo, store)
+    assert record["cog"]["key"] == f"{prefix}/derived/cog.tif"
+    assert store.exists(f"{prefix}/derived/view.tif")
+
+
+def test_ingest_reads_the_ortho_in_place_on_the_bucket_mount(repo, store, tmp_path):
+    # The local store's folder *is* a mount of its bucket: same keys, same files.
+    stored_flight(repo, store, tmp_path, write_rgba(tmp_path / "o.tif").read_bytes())
+    record = ingest_flight("flt_1", repo, store, source_dir=str(store.root))
+    assert record["state"] == "complete", record
+    assert record["readFrom"] == "mount"
+
+
+def test_ingest_copies_the_ortho_when_the_mount_lacks_it(repo, store, tmp_path):
+    stored_flight(repo, store, tmp_path, write_rgba(tmp_path / "o.tif").read_bytes())
+    (tmp_path / "empty-mount").mkdir()
+    record = ingest_flight("flt_1", repo, store, source_dir=str(tmp_path / "empty-mount"))
+    assert record["state"] == "complete", record
+    assert record["readFrom"] == "copy"
+
+
+def test_unreadable_ortho_on_the_mount_fails_with_the_users_filename(repo, store, tmp_path):
+    stored_flight(repo, store, tmp_path, b"II*\x00not really a tiff")
+    record = ingest_flight("flt_1", repo, store, source_dir=str(store.root))
+    assert record["state"] == "failed"
+    assert "field.tif" in record["error"] and str(store.root) not in record["error"]
 
 
 def test_unreadable_ortho_fails_with_the_users_filename(repo, store, tmp_path):
@@ -163,15 +198,12 @@ def test_job_entry_point_needs_a_flight_id(monkeypatch):
 # started from the API
 # ---------------------------------------------------------------------------
 def upload(client, trial, tmp_path, ortho: bytes | None = None):
-    data, files = ortho_flight_parts()
-    if ortho is not None:
-        files[0] = ("ortho", ("field.tif", ortho, "image/tiff"))
-    r = client.post(f"/api/trials/{trial['id']}/flights", data=data, files=files)
-    assert r.status_code == 201, r.text
-    return r.json()
+    if ortho is None:
+        return upload_flight(client, trial)
+    return upload_flight(client, trial, ortho=ortho)
 
 
-def test_upload_queues_ingest_and_inline_runs_it(client, trial, store, tmp_path, monkeypatch):
+def test_completed_upload_queues_ingest_and_inline_runs_it(client, trial, store, tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "INGEST_RUNNER", "inline")
     flight = upload(client, trial, tmp_path, write_rgba(tmp_path / "o.tif").read_bytes())
     assert flight["ingest"]["state"] == "queued"  # the answer goes out before ingest runs
@@ -187,12 +219,10 @@ def test_runner_off_leaves_the_flight_queued(client, trial, tmp_path):
     assert flight["ingest"]["state"] == "queued"
 
 
-def test_clipped_flights_have_nothing_to_ingest(client, trial):
-    data = {"meta": json.dumps({"flightDate": "2026-08-20", "source": "clipped", "capture": "12-ms", "modelId": "cc-v1"})}
-    files = [("clipped", ("plot_001.tif", b"II*\x00", "image/tiff"))]
-    flight = client.post(f"/api/trials/{trial['id']}/flights", data=data, files=files).json()
-    assert flight["ingest"] is None
-    assert client.post(f"/api/trials/{trial['id']}/flights/{flight['id']}/ingest").status_code == 422
+def test_nothing_is_ingested_before_the_upload_completes(client, trial):
+    flight = start_flight(client, trial).json()["flight"]
+    assert flight.get("ingest") is None
+    assert client.post(f"/api/trials/{trial['id']}/flights/{flight['id']}/ingest").status_code == 409
 
 
 def test_rerun_refuses_while_queued_unless_forced(client, trial, tmp_path, monkeypatch):
@@ -248,3 +278,18 @@ def test_cloudrun_refusal_is_recorded_on_the_flight(client, trial, tmp_path, mon
     assert "runWithOverrides" in flight["ingest"]["error"]
     stored = client.get(f"/api/trials/{trial['id']}/flights/{flight['id']}").json()
     assert stored["ingest"]["state"] == "failed", "the upload itself still succeeded"
+
+
+def test_an_ingest_running_past_the_jobs_timeout_reads_as_failed(client, trial, repo, monkeypatch):
+    flight = upload(client, trial, None)
+    path = f"/api/trials/{trial['id']}/flights/{flight['id']}"
+    long_ago = "2026-01-01T00:00:00+00:00"
+    repo.update_flight(flight["id"], {"ingest": {"state": "running", "queuedAt": long_ago, "startedAt": long_ago}})
+
+    stalled = client.get(path).json()["ingest"]
+    assert stalled["state"] == "failed" and "memory" in stalled["error"]
+    assert client.get(f"/api/trials/{trial['id']}/flights").json()[0]["ingest"]["state"] == "failed"
+    assert client.post(f"{path}/ingest").status_code == 202, "a stalled ingest can be retried without forcing"
+
+    repo.update_flight(flight["id"], {"ingest": {"state": "running", "startedAt": jobs.utcnow()}})
+    assert client.get(path).json()["ingest"]["state"] == "running"

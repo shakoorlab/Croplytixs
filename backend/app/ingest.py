@@ -26,6 +26,13 @@ The viewing copy is built from a small VRT — an XML description of "bands
 full-size intermediate, so GDAL streams source → COG and the only big files on
 disk are the source and the output. On Cloud Run that disk is RAM.
 
+The source needn't be on that disk at all. On Cloud Run the job mounts the
+bucket as a folder (a Cloud Storage volume; INGEST_SOURCE_DIR says where), and
+ingest reads the ortho there in place, so a 5 GB upload doesn't first cost 5 GB
+of the job's memory. Without the mount — a laptop, or a job not yet given one —
+it copies the ortho to local disk first, as before. The flight's `ingest` record
+says which happened (`readFrom`).
+
 The band choice and contrast stretch match the upload page's preview
 (frontend/src/sections/trials/flight-setup/geo/readOrtho.js), so the map shows
 the colours the user saw when they checked the grid.
@@ -210,15 +217,41 @@ def _upload(store: ObjectStore, key: str, path: Path) -> int:
         return store.put(key, f, content_type=COG_MEDIA_TYPE)
 
 
-def ingest_flight(flight_id: str, repo: Repo, store: ObjectStore, *, view_compression: str = "WEBP") -> dict[str, Any]:
+def _source(store: ObjectStore, ortho: dict, work: Path, source_dir: str | None) -> tuple[Path, str]:
+    """The ortho as a local path: in place on the bucket mount when there is one,
+    otherwise copied into `work`. Returns the path and how it was got."""
+    if source_dir:
+        mounted = Path(source_dir) / ortho["key"]
+        if mounted.is_file():
+            return mounted, "mount"
+        log.warning("ingest: %s is not under %s; copying it instead", ortho["key"], source_dir)
+    # Saved under the user's own filename so GDAL's messages name the file they
+    # uploaded; in its own folder so an upload called cog.tif can't collide
+    # with an output.
+    copy = work / "source" / ortho["name"]
+    copy.parent.mkdir()
+    with copy.open("wb") as out:
+        for chunk in store.open(ortho["key"]):
+            out.write(chunk)
+    return copy, "copy"
+
+
+def ingest_flight(
+    flight_id: str,
+    repo: Repo,
+    store: ObjectStore,
+    *,
+    view_compression: str = "WEBP",
+    source_dir: str | None = None,
+) -> dict[str, Any]:
     """Builds both COGs for one flight and records the outcome on it.
 
     Never raises for a bad flight: the failure is written to `ingest` instead,
     where the flight page shows it. Returns that record. Each output is
-    uploaded and deleted before the next is built, so at most the source and
-    one output occupy the disk at once.
+    uploaded and deleted before the next is built, so at most one output (and
+    the source, when it had to be copied) occupies the disk at once.
     """
-    flight = repo.get_flight(flight_id)
+    flight = repo.get_flight_unscoped(flight_id)
     if not flight:
         raise LookupError(f"No flight '{flight_id}'.")
     previous = flight.get("ingest") or {}
@@ -226,22 +259,21 @@ def ingest_flight(flight_id: str, repo: Repo, store: ObjectStore, *, view_compre
     repo.update_flight(flight_id, {"ingest": record})
 
     ortho = next((f for f in flight.get("files", []) if f["role"] == "ortho"), None)
-    prefix = f"trials/{flight['trialId']}/flights/{flight_id}/derived"
+    # Flights from before accounts have no storagePrefix; their files sit under trials/.
+    base = flight.get("storagePrefix") or f"trials/{flight['trialId']}/flights/{flight_id}"
+    prefix = f"{base}/derived"
     try:
         if not ortho:
             raise IngestError("This flight has no orthophoto to ingest.")
         import rasterio
         from rasterio.errors import RasterioError
 
-        with tempfile.TemporaryDirectory(prefix="ingest-") as work:
-            # Saved under the user's own filename so GDAL's messages name the file
-            # they uploaded; in its own folder so an upload called cog.tif can't
-            # collide with an output.
-            source = Path(work) / "source" / ortho["name"]
-            source.parent.mkdir()
-            with source.open("wb") as out:
-                for chunk in store.open(ortho["key"]):
-                    out.write(chunk)
+        # EMPTY_DIR: GDAL otherwise lists the source's folder looking for
+        # sidecar files (.ovr, .aux.xml), which on the bucket mount is a listing
+        # call to Cloud Storage. An uploaded ortho never has sidecars there.
+        with tempfile.TemporaryDirectory(prefix="ingest-") as work, rasterio.Env(GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR"):
+            source, read_from = _source(store, ortho, Path(work), source_dir)
+            record["readFrom"] = read_from
             try:
                 with rasterio.open(source) as src:
                     raster = raster_info(src)
@@ -292,7 +324,9 @@ def main(argv: list[str] | None = None) -> int:
         print("usage: python -m app.ingest <flight_id>   (or set FLIGHT_ID)", file=sys.stderr)
         return 2
 
-    record = ingest_flight(flight_id, get_repo(), get_store(), view_compression=settings.VIEW_COMPRESSION)
+    record = ingest_flight(
+        flight_id, get_repo(), get_store(), view_compression=settings.VIEW_COMPRESSION, source_dir=settings.INGEST_SOURCE_DIR
+    )
     log.info("ingest %s: %s", flight_id, record["state"])
     # Non-zero marks the execution failed in the Cloud Run console.
     return 0 if record["state"] == "complete" else 1

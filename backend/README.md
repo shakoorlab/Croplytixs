@@ -7,10 +7,15 @@ Cloud Run. Setup and deploy: [`docs/gcp-setup.md`](docs/gcp-setup.md).
 
 ```
 browser ──HTTPS──▶ Cloud Run: croplytix-api (this image)
-                      │
-                      ├── records ──▶ Firestore (default)   trials/{id}, flights/{id}
-                      └── bytes   ──▶ GCS bucket            trials/{id}/flights/{id}/{role}/{file}
+   │                  │
+   │                  ├── records ──▶ Firestore (default)   trials/{account}:{trial}, flights/{flight}
+   │                  └── upload sessions, then checks ──┐
+   │                                                     ▼
+   └── file bytes, 8 MiB chunks ──────────────▶ GCS bucket   accounts/{account}/trials/{trial}/flights/{flight}/{role}/{file}
 ```
+
+Every record and file belongs to one account — today, one per signed-in user —
+and the API only ever shows a caller their own account's (`app/db.py`).
 
 ## Why it is shaped this way
 
@@ -31,10 +36,11 @@ bucket move (S3, MinIO) by touching one file.
 One Docker image, three environments: laptop (`.env`), Cloud Run
 (`deploy/env.cloudrun.yaml`), and — if ever needed — the free-tier VM.
 
-**Bytes first, record second.** The flight handler streams every file into the
-bucket and only then writes the Firestore document. A crash in between leaves an
-orphaned object (cents, sweepable); the other order would leave a record pointing
-at nothing, which the UI would trip over forever.
+**File bytes never pass through the API.** Cloud Run refuses requests over 32 MiB,
+and an orthophoto is gigabytes. The API opens a Cloud Storage *resumable upload
+session* per file, the browser sends the bytes straight to the bucket, and a final
+`complete` call has the API check every file arrived at its declared size before
+the flight counts as uploaded (`app/routers/flights.py`, `app/storage.py`).
 
 **Sync handlers.** Google's client libraries block. FastAPI runs plain `def` routes
 in a thread pool, so a slow upload never stalls the event loop; `async def` around
@@ -63,22 +69,28 @@ the end of `docs/gcp-setup.md` (Application Default Credentials).
 | GET | `/api/health` | liveness + which adapters are wired |
 | GET / POST | `/api/trials` | list / create (JSON body, see `TrialCreate`) |
 | GET | `/api/trials/{trial_id}` | one trial with derived stats |
-| GET / POST | `/api/trials/{trial_id}/flights` | list / create (multipart: `meta` JSON + `ortho`, `shapefile[]`, `clipped[]`) |
+| GET | `/api/me` | who the token says you are |
+| GET / POST | `/api/trials/{trial_id}/flights` | list / create: JSON `{meta, files: [{role, name, size}]}` → the flight (`awaiting_upload`) + one upload URL per file |
 | GET | `/api/trials/{trial_id}/flights/{flight_id}` | one flight |
+| POST | `/api/trials/{trial_id}/flights/{flight_id}/complete` | check the files arrived, record their MD5s, mark `uploaded`, start ingest |
+| POST | `/api/trials/{trial_id}/flights/{flight_id}/uploads` | new upload URLs for files that haven't arrived (lost or expired URLs) |
+| DELETE | `/api/trials/{trial_id}/flights/{flight_id}` | abandon a flight whose upload hasn't finished |
 | POST | `/api/trials/{trial_id}/flights/{flight_id}/ingest` | build the flight's COGs again (`?force=true` if stuck) |
-| GET | `/api/trials/{trial_id}/flights/{flight_id}/files/{role}/{name}` | stream a stored file back |
+| GET | `/api/trials/{trial_id}/flights/{flight_id}/files/{role}/{name}` | stream a stored file back (up to 32 MiB) |
+| PUT / DELETE | `/api/local-uploads/{session_id}` | local runs only: stands in for Cloud Storage's upload sessions |
+
+Every route but `/api/health` and the local upload stand-in needs a signed-in user.
 
 `/docs` has the live version with schemas and a try-it-out form.
 
 ## Known limits, and what fixes them
 
-- **Uploads ≤ 30 MB per file.** Cloud Run rejects HTTP/1 requests over 32 MiB.
-  Fine for pre-clipped plot TIFs and demo orthos; multi-GB orthos need the browser
-  to upload straight to the bucket with a short-lived *signed URL* the API hands
-  out, so the bytes never pass through Cloud Run. The seam is in place; it is the
-  next backend slice after auth.
-- **No authentication.** The service URL is public. Next slice: Identity Platform /
-  Firebase Auth tokens checked in a dependency.
+- **Downloads ≤ 32 MiB.** `GET …/files/…` streams through the API, so Cloud Run's
+  response limit applies. Larger files will get short-lived signed download URLs,
+  together with the map viewer, which takes the API out of the data path.
+- **One account per user.** Nobody sees anyone else's trials yet. Sharing between
+  accounts is a later decision; `app.auth.account_id_for` is the one place that
+  decides which account a user acts for.
 - **Status stops at `uploaded`.** Ingest (`app/ingest.py`, the Cloud Run job
   `croplytix-ingest`) turns each ortho into a lossless COG and a viewing COG and
   records them in the flight's `ingest` field. The clip-and-infer worker that moves

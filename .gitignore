@@ -1,3 +1,5 @@
 .Context/
 /Claude outputs/
 /Context/
+# macOS Finder metadata
+.DS_Store

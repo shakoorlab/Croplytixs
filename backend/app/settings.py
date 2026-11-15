@@ -48,11 +48,16 @@ class Settings(BaseSettings):
     # URL). Behind nginx it is moot. Comma-separated because env vars are flat
     # strings and a JSON list is awkward to pass through `gcloud`.
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
-    # Hard ceiling on a single uploaded file. Cloud Run rejects HTTP/1 requests
-    # over 32 MiB before they reach us, so the default sits under that and turns
-    # an opaque gateway error into a clear 413. Multi-GB orthos are a different
-    # upload design (direct-to-bucket signed URLs), not a bigger number here.
-    MAX_UPLOAD_MB: int = 30
+
+    # ---- uploads ------------------------------------------------------------
+    # The browser sends files straight to the bucket (see app/storage.py), so
+    # these are not Cloud Run's limits; they are what the API agrees to open an
+    # upload session for. Each session is opened for an exact size, and Cloud
+    # Storage refuses to finish an object at any other, so a declared 2 GB file
+    # can't turn into 200 GB on the way in. The ortho's ceiling is really set by
+    # ingest, which needs memory for the COGs it writes (docs/gcp-setup.md, step 10).
+    MAX_ORTHO_MB: int = 10 * 1024
+    MAX_SHAPEFILE_MB: int = 100  # per file of the set
 
     # ---- ingest (orthophoto → COGs, see app/ingest.py) ------------------------
     # Where ingest runs when a flight is uploaded:
@@ -63,6 +68,16 @@ class Settings(BaseSettings):
     INGEST_RUNNER: Literal["inline", "cloudrun", "off"] = "inline"
     INGEST_JOB: str = "croplytix-ingest"
     INGEST_REGION: str | None = None  # the job's region, e.g. us-central1; required for cloudrun
+    # Where the ingest job finds the bucket mounted as a folder (a Cloud Storage
+    # volume on the job). When the ortho is there, ingest reads it in place
+    # instead of copying it into the job's memory first — on Cloud Run the
+    # disk is RAM, so that copy costs as much memory as the file. Unset, or the
+    # file not found there: ingest copies it, as on a laptop.
+    INGEST_SOURCE_DIR: str | None = None
+    # The job's --task-timeout. A job killed for running out of memory can't
+    # record that it failed, so an ingest still "running" this long after it
+    # started is reported as failed (app/routers/flights.py).
+    INGEST_TIMEOUT_MINUTES: int = 30
     # The viewing copy's compression. Both decode in every current browser;
     # WebP is ~15% smaller on the sample ortho, JPEG decodes without
     # createImageBitmap. Change it and re-run ingest to compare.

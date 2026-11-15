@@ -15,6 +15,10 @@ This module turns that header into a `User` — or refuses the request:
     Google's public keys unreachable       → 503 (our outage, not the caller's fault)
     all good                               → User(uid, email)
 
+`current_account` then says which account the request acts for. Every trial,
+flight and file belongs to one account, and the API only ever shows a caller
+their own (see app/db.py).
+
 Every 401 carries `WWW-Authenticate: Bearer` — RFC 6750's way of telling a
 client *how* to authenticate, not just that it failed.
 
@@ -38,7 +42,9 @@ library": https://firebase.google.com/docs/auth/admin/verify-id-tokens
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import re
 import time
 from dataclasses import dataclass
 from functools import lru_cache
@@ -218,3 +224,29 @@ def current_user(
 def _unauthorized(detail: str) -> HTTPException:
     """A 401 that says how to authenticate (RFC 6750), not just that it failed."""
     return HTTPException(status_code=401, detail=detail, headers={"WWW-Authenticate": "Bearer"})
+
+
+# ---- whose data -------------------------------------------------------------------
+# An account id ends up in Firestore document ids and in object keys, so it is held
+# to the characters both accept without escaping.
+_SAFE_ACCOUNT_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
+
+
+def account_id_for(uid: str) -> str:
+    """The account a signed-in user's trials, flights and files belong to.
+
+    One account per user for now — the design's decision; sharing between
+    accounts comes later — so it is the user's uid, which Identity Platform
+    mints as 28 letters and digits. A uid with any other character (possible
+    for users created through the Admin SDK) becomes a hash of itself: still
+    stable, still unique, and safe in a key. Deriving it here, in one place, is
+    what lets a team account replace it later without touching the routers.
+    """
+    if _SAFE_ACCOUNT_ID.fullmatch(uid):
+        return uid
+    return "u" + hashlib.sha256(uid.encode()).hexdigest()[:32]
+
+
+def current_account(user: User = Depends(current_user)) -> str:
+    """The dependency routers use to scope every read and write to the caller's account."""
+    return account_id_for(user.uid)

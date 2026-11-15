@@ -72,13 +72,20 @@ def queued() -> dict:
 def start_ingest(flight_id: str, repo: Repo, store: ObjectStore, background: BackgroundTasks) -> dict:
     """Kicks off ingest for a flight already recorded as queued. Returns the
     flight's `ingest` record as it stands when the request answers."""
-    record = (repo.get_flight(flight_id) or {}).get("ingest") or queued()
+    record = (repo.get_flight_unscoped(flight_id) or {}).get("ingest") or queued()
     if settings.INGEST_RUNNER == "off":
         return record
     if settings.INGEST_RUNNER == "inline":
         from .ingest import ingest_flight
 
-        background.add_task(ingest_flight, flight_id, repo, store, view_compression=settings.VIEW_COMPRESSION)
+        background.add_task(
+            ingest_flight,
+            flight_id,
+            repo,
+            store,
+            view_compression=settings.VIEW_COMPRESSION,
+            source_dir=settings.INGEST_SOURCE_DIR,
+        )
         return record
 
     # cloudrun: synchronous on purpose — one quick HTTPS call, made while the

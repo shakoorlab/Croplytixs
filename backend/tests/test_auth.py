@@ -155,7 +155,7 @@ def test_key_outage_is_503_not_401(browser, keys):
 def test_refused_write_never_reaches_the_handler(browser, repo):
     r = browser.post("/api/trials", json={"name": "Sneaky", "crop": "Yam", "site": "Roujol", "season": "2026"})
     assert r.status_code == 401
-    assert repo.list_trials() == []
+    assert repo.list_trials("uid-jake") == []
 
 
 def test_signed_in_write_goes_through(browser):
@@ -176,7 +176,10 @@ def _runs(dependant, target) -> bool:
 
 def test_every_api_route_requires_sign_in():
     """Guards the future: a router added without auth fails here, not in production."""
-    public = {"/api/health"}
+    # /api/local-uploads exists only with STORAGE_BACKEND=local (so in these tests):
+    # a stand-in for Cloud Storage's upload sessions, whose unguessable session
+    # id is the credential, as it is for Cloud Storage. See app/routers/local_uploads.py.
+    public = {"/api/health", "/api/local-uploads/{session_id}"}
     routes = [r for r in app.routes if isinstance(r, APIRoute) and r.path.startswith("/api") and r.path not in public]
     assert routes, "no /api routes found"
     unguarded = [f"{sorted(r.methods)} {r.path}" for r in routes if not _runs(r.dependant, current_user)]

@@ -194,13 +194,12 @@ minutes the first time; later builds reuse the dependency layer and are faster.
   Without a Dockerfile it would guess with buildpacks; we don't want guessing.
 - `--service-account` — run as the identity from step 4, not the default.
 - `--allow-unauthenticated` — the browser calls this API directly, and browsers
-  can't carry Google IAM credentials. So the URL is public. **That means anyone
-  who finds it can create trials and upload files.** Acceptable for a demo; the
-  next backend slice is a login (Identity Platform / Firebase Auth) so the API can
-  check a user token.
-- `--memory 512Mi` — Cloud Run's filesystem is RAM. A 30 MB upload spools into
-  it while streaming to GCS; 512 MiB leaves room. `--cpu 1` is the smallest
-  sensible size.
+  can't carry Google IAM credentials. So the URL is public, and the API checks the
+  Identity Platform sign-in itself: every route except `/api/health` refuses a
+  request without a valid ID token.
+- `--memory 512Mi` — file bytes never pass through the API (the browser sends them
+  straight to the bucket), so it only handles small JSON requests and the
+  occasional small download. 512 MiB is ample. `--cpu 1` is the smallest sensible size.
 - `--min-instances 0` — scale to zero. This is the whole reason Cloud Run fits the
   free tier: no requests, no bill. The cost is a *cold start* of ~1–2 s on the
   first request after idle. If that would look bad in the demo, warm it up with a
@@ -208,13 +207,11 @@ minutes the first time; later builds reuse the dependency layer and are faster.
 - `--max-instances 2` — a ceiling. If something loops or a script hammers the API,
   it cannot fan out to hundreds of containers and run up the bill.
 - `--concurrency 10` — requests per container before Cloud Run starts another.
-  Memory sets this ceiling, not CPU: an upload in flight holds its whole request
-  (up to 32 MiB) in `/tmp`, which is RAM on Cloud Run, plus the 8 MiB send buffer
-  from `GcsObjectStore.put` — about 40 MiB each. Ten of those plus the ~90 MiB idle
-  process is ~490 MiB, just under 512Mi. At 20, a burst of large uploads could push
-  the container past its memory limit and Cloud Run would kill it mid-request.
-- `--timeout 300` — five minutes per request, plenty for a 30 MB upload on a slow
-  link.
+  With uploads going straight to the bucket this could go higher; the ceiling now
+  is the downloads `GET …/files/…` streams back (up to 32 MiB each, 1 MiB in
+  memory at a time), so 10 stays a comfortable margin.
+- `--timeout 300` — five minutes per request. Requests are quick now; the long
+  part of an upload happens between the browser and Cloud Storage.
 
 When it finishes it prints `Service URL: https://croplytix-api-....run.app`.
 Keep that:
@@ -243,36 +240,60 @@ then re-run the deploy.
 curl -s $API_URL/api/health
 ```
 
-Expect `{"ok":true,"storage":"gs://croplytix-...-uploads","db":"firestore:(default)"}`.
+Expect `{"ok":true,"storage":"gs://croplytix-...-uploads","db":"firestore:(default)","auth":"identity-platform:..."}`.
 That line is the adapters reporting *which* backends this process wired up — the
 first thing to check when something works locally and not in the cloud.
 
+Every other route needs a signed-in user. Get an ID token for your own account
+(`scripts/get_token.py` signs in the way the browser does; its header says which
+key it needs):
+
 ```bash
-curl -s -X POST $API_URL/api/trials \
+export ID_TOKEN=$(python3 scripts/get_token.py you@example.com)
+AUTH="Authorization: Bearer $ID_TOKEN"
+curl -s -H "$AUTH" $API_URL/api/me
+```
+
+```bash
+curl -s -X POST $API_URL/api/trials -H "$AUTH" \
   -H 'content-type: application/json' \
   -d '{"name":"Demo Yam Trial","crop":"Yam","site":"Guadeloupe","season":"2026","plots":144}'
 ```
 
 Now go look at the record from the other side: **Console → Firestore → Data** — a
-`trials` collection with a document id `demo-yam-trial-2026`. That's the slug the
-API minted from name + season.
+`trials` document with the id `<your uid>:demo-yam-trial-2026`: the account it
+belongs to, then the slug the API minted from name + season. Every trial and
+flight belongs to an account, and the API shows each user only their own.
 
-Upload a flight (any small files will do for the check — a real .tif and shapefile
-parts once the frontend is wired):
+Upload a flight the way the browser does. The bytes don't go through the API:
+declare the files, send them straight to the bucket, then say you're done.
 
 ```bash
-printf 'fake' > /tmp/o.tif; printf 'fake' > /tmp/p.shp; printf 'fake' > /tmp/p.prj
-curl -s -X POST $API_URL/api/trials/demo-yam-trial-2026/flights \
-  -F 'meta={"flightDate":"2026-08-20","source":"ortho","capture":"12-ms","modelId":"cc-v1","plots":144}' \
-  -F ortho=@/tmp/o.tif -F shapefile=@/tmp/p.shp -F shapefile=@/tmp/p.prj
+printf 'fake' > /tmp/o.tif
+curl -s -X POST $API_URL/api/trials/demo-yam-trial-2026/flights -H "$AUTH" \
+  -H 'content-type: application/json' \
+  -d '{"meta":{"flightDate":"2026-08-20","capture":"12-ms","plots":144},
+       "files":[{"role":"ortho","name":"o.tif","size":4}]}' > /tmp/flight.json
+FLIGHT=$(python3 -c "import json; print(json.load(open('/tmp/flight.json'))['flight']['id'])")
+UPLOAD=$(python3 -c "import json; print(json.load(open('/tmp/flight.json'))['uploads'][0]['url'])")
 
-gcloud storage ls -r gs://$BUCKET
+curl -s -X PUT "$UPLOAD" --data-binary @/tmp/o.tif     # to Cloud Storage; no token
+curl -s -X POST $API_URL/api/trials/demo-yam-trial-2026/flights/$FLIGHT/complete -H "$AUTH"
+
+gcloud storage ls -r gs://$BUCKET/accounts/
 ```
 
-The `ls` shows `trials/demo-yam-trial-2026/flights/flt_.../ortho/o.tif` and the two
-shapefile parts. Buckets are flat — those slashes are just characters in the
-object name — but the naming convention makes the bucket browse like a tree and
-lets you attach lifecycle rules per prefix later.
+The create call answers with the flight (`awaiting_upload`) and one upload URL per
+file: a Cloud Storage *resumable upload session*, opened by the API for exactly the
+size declared. The URL is the only credential the upload needs, so treat it like a
+password; it lasts about a week. `complete` checks the file arrived at that size,
+records its MD5, marks the flight `uploaded` and starts ingest, which then fails on
+the fake TIFF and says so on the flight. That's expected.
+
+The `ls` shows `accounts/<uid>/trials/demo-yam-trial-2026/flights/flt_.../ortho/o.tif`.
+Buckets are flat — those slashes are just characters in the object name — but the
+naming convention makes the bucket browse like a tree and lets you attach lifecycle
+rules per prefix later.
 
 Logs, when anything surprises you:
 
@@ -414,8 +435,8 @@ https://docs.cloud.google.com/billing/docs/how-to/budgets-spend-caps
 
 ## 10. The ingest job — every ortho becomes two COGs
 
-Every ortho upload now starts *ingest* (`app/ingest.py`). It turns the stored ortho
-into two Cloud-Optimized GeoTIFFs under `trials/…/flights/…/derived/`:
+Every completed ortho upload starts *ingest* (`app/ingest.py`). It turns the stored
+ortho into two Cloud-Optimized GeoTIFFs under the flight's `…/derived/`:
 
 - `cog.tif` — lossless, every band, for the clip and inference jobs;
 - `view.tif` — 8-bit natural colour plus a mask, WebP, about a fifth of the
@@ -444,8 +465,9 @@ gcloud run jobs deploy croplytix-ingest \
   --env-vars-file deploy/env.cloudrun.yaml \
   --command python \
   --args=-m,app.ingest \
-  --memory 2Gi \
-  --cpu 1 \
+  --add-volume mount-path=/mnt/uploads,type=cloud-storage,bucket=$BUCKET,readonly=true \
+  --memory 8Gi \
+  --cpu 2 \
   --max-retries 0 \
   --task-timeout 30m
 
@@ -456,20 +478,43 @@ gcloud run jobs add-iam-policy-binding croplytix-ingest \
   --role="roles/run.jobsExecutorWithOverrides"
 ```
 
+**Already have the job from before?** Give it the bucket mount and the memory
+(the env file now carries `INGEST_SOURCE_DIR`):
+
+```bash
+gcloud run jobs update croplytix-ingest --region $REGION \
+  --env-vars-file deploy/env.cloudrun.yaml \
+  --add-volume mount-path=/mnt/uploads,type=cloud-storage,bucket=$BUCKET,readonly=true \
+  --memory 8Gi --cpu 2
+```
+
 *Why each piece:*
 
 - `--image $IMAGE` — the image the API is running, so the job and the API run
   the same code.
 - `--service-account $SA_EMAIL` — the API's identity. It already reads and writes
   this bucket and Firestore, which is all ingest does.
-- `--env-vars-file` — the same bucket and database settings. The `INGEST_*` lines
-  in it are for the API; the job ignores them.
-- `--memory 2Gi` — the job's disk is RAM too. It downloads the ortho and keeps one
-  output on disk at a time, so the peak is about the ortho plus its lossless copy
-  (~1.3×) plus GDAL's cache. Under the current 30 MB upload limit, 2 GiB is
-  plenty. When direct-to-bucket uploads lift that limit, size this at about 3× the
-  largest ortho (Cloud Run allows 32 GiB), or have ingest read the ortho in place
-  over `/vsigs/`.
+- `--env-vars-file` — the same bucket and database settings. `INGEST_SOURCE_DIR`
+  is for the job; the other `INGEST_*` lines are for the API, and the job ignores them.
+- `--add-volume … type=cloud-storage` — mounts the bucket, read-only, as the folder
+  `/mnt/uploads`. `INGEST_SOURCE_DIR` in the env file points ingest at it, so it
+  reads each ortho in place instead of copying it to the job's disk first. The
+  job's disk is RAM, so that copy would cost as much memory as the ortho. The mount
+  reads only the parts GDAL asks for, straight from Cloud Storage. If the mount is
+  missing, ingest copies the ortho and still works; the flight's `ingest.readFrom`
+  says which happened (`mount` or `copy`).
+- `--memory 8Gi --cpu 2` — what's left on the RAM disk is ingest's output: the
+  lossless COG (about the ortho's size, sometimes more) and the overviews GDAL
+  builds for it (about a third more), plus GDAL's cache. Budget about 2× the
+  largest ortho plus 1 GiB, so 8 GiB covers orthos up to about 3.5 GB. Raise it
+  when real orthos are bigger. Cloud Run allows up to 32 GiB; more memory needs
+  more vCPUs, and `gcloud` names the minimum if you ask for too few. A job is
+  billed only while it runs, so the size costs little.
+
+  A job killed for running out of memory can't record that it failed. The API
+  reports any ingest still `running` 35 minutes after it started (the task
+  timeout plus 5) as `failed`, with a note to give the job more memory, and
+  **Retry** works on it.
 - `--max-retries 0` — a failure is written on the flight with its reason, and
   retrying a corrupt file can't help. **Retry** on the flight page starts a fresh
   execution.
@@ -512,6 +557,24 @@ numpy make the image about 160 MB bigger unpacked, so delete old images now and
 then to stay near the 0.5 GB free tier.
 
 ---
+
+## 11. One time: give records from before accounts an owner
+
+Every trial and flight now belongs to an account (one per user), and the API shows
+each user only their own. Records written before that have no owner, so nobody sees
+them. To give them all to one user, from `backend/`:
+
+```bash
+gcloud auth application-default login     # once, if you haven't
+python -m scripts.assign_account --project $PROJECT_ID --uid USER_UID           # shows what it will do
+python -m scripts.assign_account --project $PROJECT_ID --uid USER_UID --apply   # does it
+```
+
+`USER_UID` is in **Identity Platform → Users → User UID** (or `curl -H "$AUTH"
+$API_URL/api/me`). Each trial moves to the document id `<uid>:<trial id>`, each
+flight gets the account. Files stay where they are: a flight records its files'
+keys, so old `trials/…` keys keep working beside new `accounts/…` ones. Running it
+again changes nothing.
 
 ## Optional, but the best lesson in here: run the API on your laptop against the real cloud
 
