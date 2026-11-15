@@ -71,18 +71,22 @@ export async function readShapefile(fileList) {
   const shpFile = byExt(files, '.shp');
   const dbfFile = byExt(files, '.dbf');
   const prjFile = byExt(files, '.prj');
+  const cpgFile = byExt(files, '.cpg');
 
   if (!shpFile) throw new Error('No .shp in the selection.');
 
-  const [shpBuffer, dbfBuffer, prjText] = await Promise.all([
+  const [shpBuffer, dbfBuffer, prjText, cpgText] = await Promise.all([
     readArrayBuffer(shpFile),
     dbfFile ? readArrayBuffer(dbfFile) : Promise.resolve(null),
-    prjFile ? readText(prjFile) : Promise.resolve(null)
+    prjFile ? readText(prjFile) : Promise.resolve(null),
+    cpgFile ? readText(cpgFile) : Promise.resolve(null)
   ]);
 
   // no transform argument → coordinates stay in the shapefile's own CRS
   const geometries = parseShp(shpBuffer);
-  const records = dbfBuffer ? parseDbf(dbfBuffer) : [];
+  // The .cpg names the .dbf's text encoding; without it accented values (variety
+  // names, "parcelle") can come out garbled.
+  const records = dbfBuffer ? parseDbf(dbfBuffer, cpgText?.trim() || undefined) : [];
 
   const features = geometries.map((geometry, i) => ({
     properties: records[i] || {},

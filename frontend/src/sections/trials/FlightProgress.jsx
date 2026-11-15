@@ -11,6 +11,8 @@ import StepLabel from '@mui/material/StepLabel';
 
 // project imports
 import { NESTED_PANEL_FRAMED } from 'sections/trials/surfaces';
+import { uploadLabel } from 'sections/trials/FlightUpload';
+import { useFlightUpload } from 'api/uploads';
 import formatRelative from 'utils/formatRelative';
 
 // Each stage is done, active (working on it), waiting (its turn, not started) or failed.
@@ -33,8 +35,12 @@ const PROCESSING = {
  * ingest's map copies (ortho flights only), processing, then results. Nothing
  * here is estimated — a stage that hasn't started says so.
  */
-export function flightStages(flight) {
-  const stages = [{ key: 'upload', label: 'Uploaded', state: 'done', detail: formatRelative(flight.createdAt) }];
+export function flightStages(flight, upload) {
+  const stages = [
+    flight.status === 'awaiting_upload'
+      ? { key: 'upload', label: 'Upload', state: upload && upload.state !== 'failed' ? 'active' : 'waiting', detail: uploadLabel(upload) }
+      : { key: 'upload', label: 'Uploaded', state: 'done', detail: formatRelative(flight.uploadedAt || flight.createdAt) }
+  ];
   if (flight.source === 'ortho') {
     stages.push({ key: 'copies', label: 'Map copies', ...(MAP_COPIES[flight.ingest?.state] || { state: 'waiting', detail: 'Not built' }) });
   }
@@ -64,7 +70,8 @@ const DETAIL_COLOR = { done: 'success.main', active: 'primary.main', waiting: 't
  * progress the worker reports — so it moves only when something really has.
  */
 export default function FlightProgress({ flight }) {
-  const stages = flightStages(flight);
+  const upload = useFlightUpload(flight.id);
+  const stages = flightStages(flight, upload);
   const done = stages.filter((stage) => stage.state === 'done').length;
   const withinProcessing = flight.status === 'running' ? (flight.progress || 0) / 100 : 0;
   const percent = Math.round(((done + withinProcessing) / stages.length) * 100);
@@ -74,7 +81,9 @@ export default function FlightProgress({ flight }) {
 
   let explanation =
     'Per-plot masks, fractional cover and canopy area appear here when processing finishes. There’s nothing to do until then.';
-  if (flight.status === 'failed') explanation = flight.error || 'Processing failed. No error detail was recorded.';
+  if (flight.status === 'awaiting_upload')
+    explanation = 'The files are still on their way to storage. The map copies are built as soon as all of them have arrived.';
+  else if (flight.status === 'failed') explanation = flight.error || 'Processing failed. No error detail was recorded.';
   else if (flight.ingest?.state === 'failed') explanation = 'The map copies couldn’t be built. Use Retry in the Progress box above.';
   else if (flight.status === 'complete')
     explanation = 'Processing is complete. Per-plot results will be listed here once the API serves them.';

@@ -11,20 +11,37 @@ export function formatBytes(bytes) {
 /**
  * A shapefile is a file *set*. Anything without a .prj has no CRS, which is the
  * fastest way to silently produce georeferenced garbage — so it is a hard block,
- * not a warning.
+ * not a warning. The API checks the same rules (backend/app/routers/flights.py);
+ * checking here too means a bad selection is caught before anything is sent.
  */
 export const REQUIRED_SHAPEFILE_MEMBERS = ['.shp', '.shx', '.dbf', '.prj'];
+const OPTIONAL_SHAPEFILE_MEMBERS = ['.cpg']; // the .dbf's text encoding
+
+const extensionOf = (name) => (name.lastIndexOf('.') > 0 ? name.slice(name.lastIndexOf('.')).toLowerCase() : '');
+const stemOf = (name) => name.slice(0, name.length - extensionOf(name).length).toLowerCase();
 
 export function inspectShapefileSelection(fileList) {
-  const names = Array.from(fileList || []).map((f) => f.name.toLowerCase());
+  const names = Array.from(fileList || []).map((f) => f.name);
   if (!names.length) return { ok: false, error: null, members: [] };
 
-  // a zipped shapefile is inspected server-side; accept it optimistically
-  if (names.length === 1 && names[0].endsWith('.zip')) {
+  // a zipped shapefile is parsed whole by readShapefile; accept it on its own
+  if (names.length === 1 && extensionOf(names[0]) === '.zip') {
     return { ok: true, error: null, members: ['.zip'], zipped: true };
   }
+  const extensions = names.map(extensionOf);
+  if (extensions.includes('.zip')) {
+    return { ok: false, members: [], error: 'Drop a zipped shapefile on its own, or its .shp, .shx, .dbf and .prj without the zip.' };
+  }
+  const stray = names.find((name) => ![...REQUIRED_SHAPEFILE_MEMBERS, ...OPTIONAL_SHAPEFILE_MEMBERS].includes(extensionOf(name)));
+  if (stray) return { ok: false, members: [], error: `${stray} isn't part of a shapefile (.shp, .shx, .dbf, .prj, .cpg).` };
+  const repeated = extensions.find((ext, i) => extensions.indexOf(ext) !== i);
+  if (repeated) return { ok: false, members: [], error: `One shapefile per flight: there are two ${repeated} files.` };
+  const stems = [...new Set(names.map(stemOf))];
+  if (stems.length > 1) {
+    return { ok: false, members: [], error: `These files have different names (${stems.join(', ')}). A shapefile's parts share one name.` };
+  }
 
-  const members = REQUIRED_SHAPEFILE_MEMBERS.filter((ext) => names.some((n) => n.endsWith(ext)));
+  const members = REQUIRED_SHAPEFILE_MEMBERS.filter((ext) => extensions.includes(ext));
   const missing = REQUIRED_SHAPEFILE_MEMBERS.filter((ext) => !members.includes(ext));
 
   if (missing.includes('.prj')) {
@@ -76,22 +93,4 @@ export function offsetTransform({ dxCm, dyCm, rotDeg }, cmPerPx, cx, cy) {
   const dx = (dxCm / cmPerPx).toFixed(2);
   const dy = (dyCm / cmPerPx).toFixed(2);
   return `translate(${dx} ${dy}) rotate(${rotDeg} ${cx} ${cy})`;
-}
-
-/**
- * Turns `{plot}_{genotype}_{date}.tif` into a capture regex.
- * Kept deliberately small — the real parse happens server-side on ingest.
- */
-export function patternToRegex(pattern) {
-  const tokens = [];
-  const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const source = escaped.replace(/\\\{(\w+)\\\}/g, (_, name) => {
-    tokens.push(name);
-    return '(.+?)';
-  });
-  try {
-    return { regex: new RegExp(`^${source}$`, 'i'), tokens };
-  } catch {
-    return { regex: null, tokens };
-  }
 }

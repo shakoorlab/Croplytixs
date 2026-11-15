@@ -22,7 +22,6 @@ import ThemedTooltip from 'components/ThemedTooltip';
 import { NESTED_PANEL } from 'sections/trials/surfaces';
 import { BAND_COMBOS } from './geo/readOrtho';
 import { insetRing, offsetTransform, ringCentroid, ringToPoints } from './utils';
-import { PLACEHOLDER_CANOPY_OFFSET } from './mockData';
 
 // assets
 import ArrowUpOutlined from '@ant-design/icons/ArrowUpOutlined';
@@ -53,12 +52,6 @@ const BADGE = (theme) => ({
   fontVariantNumeric: 'tabular-nums'
 });
 const ROTATION_STEP = 0.1;
-
-// deterministic pseudo-random in [0,1) so renders stay stable across re-mounts
-const hash01 = (n) => {
-  const x = Math.sin(n * 12.9898) * 43758.5453;
-  return x - Math.floor(x);
-};
 
 // ==============================|| FLIGHT SETUP - ORTHO OVERVIEW ||============================== //
 
@@ -157,7 +150,7 @@ export default function OrthoOverview({
       {/* ---- band combination: its own row under the header, so the header never squeezes it ---- */}
       {/* Colour infrared needs a near-infrared band. bandCount includes an alpha band, so an
           RGB + alpha ortho is 4 bands with nothing to switch to; count colour bands instead. */}
-      {ortho.colourBandCount >= 4 && onComboChange && (
+      {ortho.colourBandCount >= 4 && onComboChange && !ortho.previewSkipped && (
         <Box sx={{ px: 2, py: 1.25, borderBottom: '1px solid', borderColor: 'grey.A800' }}>
           <ToggleButtonGroup
             exclusive
@@ -239,7 +232,7 @@ export default function OrthoOverview({
               sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'fill', display: 'block' }}
             />
           ) : (
-            <PlaceholderField width={w} height={h} plots={plots} />
+            <FootprintOnly />
           )}
 
           {/* ---- plot polygons ---- */}
@@ -435,47 +428,31 @@ OrthoOverview.propTypes = {
   disabled: PropTypes.bool
 };
 
-// ==============================|| PLACEHOLDER FIELD ||============================== //
+// ==============================|| FOOTPRINT ONLY ||============================== //
 
 /**
- * Drawn only when the backend has not yet produced an overview render. Canopy is
- * offset from the polygon grid on purpose, so the nudge control is demonstrable
- * without a real ortho.
+ * Stands in for the image when the ortho is too large to render in the browser
+ * (readOrtho's preview budget). The plot grid is still drawn over it, on the
+ * ortho's exact extent, so a grid that misses the ortho entirely still shows.
  */
-function PlaceholderField({ width, height, plots }) {
+function FootprintOnly() {
   return (
-    <Box
-      component="svg"
-      viewBox={`0 0 ${width} ${height}`}
-      preserveAspectRatio="none"
-      sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' }}
+    <Stack
+      sx={{
+        position: 'absolute',
+        inset: 0,
+        alignItems: 'center',
+        justifyContent: 'center',
+        bgcolor: 'grey.900',
+        border: '1px dashed',
+        borderColor: 'grey.700',
+        px: 3
+      }}
     >
-      <defs>
-        <pattern id="cx-soil" width="14" height="14" patternUnits="userSpaceOnUse" patternTransform="rotate(38)">
-          <rect width="14" height="7" fill="#2b2b24" />
-          <rect y="7" width="14" height="7" fill="#26261f" />
-        </pattern>
-      </defs>
-      <rect width={width} height={height} fill="#22221c" />
-      <rect width={width} height={height} fill="url(#cx-soil)" opacity="0.9" />
-      {plots.map((plot, i) => {
-        const [cx, cy] = ringCentroid(plot.ring);
-        const rx = (Math.abs(plot.ring[1][0] - plot.ring[0][0]) / 2) * (0.55 + hash01(i + 1) * 0.4);
-        const ry = (Math.abs(plot.ring[2][1] - plot.ring[1][1]) / 2) * (0.5 + hash01(i + 7) * 0.42);
-        return (
-          <ellipse
-            key={plot.plotId}
-            cx={cx + PLACEHOLDER_CANOPY_OFFSET.x}
-            cy={cy + PLACEHOLDER_CANOPY_OFFSET.y}
-            rx={rx}
-            ry={ry}
-            fill="#4e7a35"
-            opacity={0.72 + hash01(i + 13) * 0.2}
-          />
-        );
-      })}
-    </Box>
+      <Typography variant="body2" color="text.secondary" align="center" sx={{ maxWidth: 420 }}>
+        This orthophoto is too large to draw in the browser, so the plots are shown on its outline. Its map copies are built after upload,
+        and the flight’s page shows the image.
+      </Typography>
+    </Stack>
   );
 }
-
-PlaceholderField.propTypes = { width: PropTypes.number, height: PropTypes.number, plots: PropTypes.array };

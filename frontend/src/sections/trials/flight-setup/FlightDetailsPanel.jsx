@@ -291,10 +291,21 @@ export default function FlightDetailsPanel({
 
         {uploading && (
           <Box sx={{ mt: 1.5 }}>
-            <LinearProgress variant="determinate" value={progress} />
-            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
-              {Math.round(progress)}% · keep this tab open until it finishes
-            </Typography>
+            {progress == null ? (
+              <>
+                <LinearProgress />
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+                  Starting the upload… The files then go in the background, and the Flights table shows their progress.
+                </Typography>
+              </>
+            ) : (
+              <>
+                <LinearProgress variant="determinate" value={progress} />
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>
+                  {Math.round(progress)}% · keep this tab open until it finishes
+                </Typography>
+              </>
+            )}
           </Box>
         )}
       </Box>

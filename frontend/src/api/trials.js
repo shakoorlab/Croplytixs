@@ -1,6 +1,6 @@
 import useSWR from 'swr';
 
-import { apiFetch, apiUpload, fetcher } from './client';
+import { apiFetch, fetcher } from './client';
 
 // ==============================|| API - TRIALS & FLIGHTS ||============================== //
 
@@ -20,10 +20,11 @@ export const flightsKey = (trialId) => (trialId ? `/api/trials/${trialId}/flight
 /**
  * Every status the API can put on a flight — the `Flight.status` Literal in
  * backend/app/schemas.py — and what it means to whoever is looking at it.
- * Today the API only ever writes `uploaded`; the processing worker will move
- * a flight through the rest. Pages show the record's status as it is.
+ * Today the API writes `awaiting_upload` and `uploaded`; the processing worker
+ * will move a flight through the rest. Pages show the record's status as it is.
  */
 export const FLIGHT_STATUSES = {
+  awaiting_upload: 'The files are on their way to storage. An interrupted upload can be resumed from the flight’s page.',
   uploaded: 'Files stored; waiting for the processing worker.',
   queued: 'In line for the processing worker.',
   running: 'Clipping plots and segmenting canopy.',
@@ -68,17 +69,4 @@ export function createTrial(form) {
  */
 export function rerunIngest(trialId, flightId) {
   return apiFetch(`${flightsKey(trialId)}/${flightId}/ingest`, { method: 'POST' });
-}
-
-/**
- * POST /api/trials/{id}/flights — multipart: a JSON `meta` field plus the files
- * under the part names the backend expects (`ortho`, `shapefile` ×N, `clipped` ×N).
- */
-export function createFlight(trialId, { meta, ortho = null, shapefile = [], clipped = [] }, { onProgress } = {}) {
-  const form = new FormData();
-  form.append('meta', JSON.stringify(meta));
-  if (ortho) form.append('ortho', ortho, ortho.name);
-  shapefile.forEach((file) => form.append('shapefile', file, file.name));
-  clipped.forEach((file) => form.append('clipped', file, file.name));
-  return apiUpload(flightsKey(trialId), form, { onProgress });
 }

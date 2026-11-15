@@ -84,8 +84,8 @@ export async function apiFetch(path, { method = 'GET', json, headers, ...rest } 
 /**
  * Save a stored file. A plain link can't carry the Authorization header, so the file is
  * fetched with the token and handed to the browser as a download. It passes through
- * memory, which is fine for today's ≤ 30 MB inputs; multi-GB orthos will get short-lived
- * download URLs from the API instead.
+ * memory, and through the API, which streams at most 32 MiB (Cloud Run's response
+ * limit); larger files will get short-lived download URLs from the API instead.
  */
 export async function apiDownload(path, filename) {
   const response = await fetchWithToken(path, (auth) => ({ headers: auth }));
@@ -105,27 +105,3 @@ export async function apiDownload(path, filename) {
 
 /** For `useSWR(key, fetcher)` — the key is the path. */
 export const fetcher = (path) => apiFetch(path);
-
-/**
- * Multipart upload with a progress callback. `fetch` still cannot report upload
- * progress, so this one call uses XMLHttpRequest; everything else uses fetch.
- */
-export async function apiUpload(path, formData, { onProgress } = {}) {
-  const token = await getIdToken();
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', path);
-    if (token) xhr.setRequestHeader('authorization', `Bearer ${token}`);
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable && onProgress) onProgress(Math.round((event.loaded / event.total) * 100));
-    };
-    xhr.onload = () => {
-      const body = parseBody(xhr.responseText);
-      if (xhr.status === 401) expireSession();
-      if (xhr.status >= 200 && xhr.status < 300) resolve(body);
-      else reject(new ApiError(xhr.status, detailOf(body) || `HTTP ${xhr.status}`, body));
-    };
-    xhr.onerror = () => reject(new ApiError(0, 'Upload failed — could not reach the API.'));
-    xhr.send(formData);
-  });
-}

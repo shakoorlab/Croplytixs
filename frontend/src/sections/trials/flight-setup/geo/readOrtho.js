@@ -7,6 +7,14 @@ import { crsLabel, makeAffine } from './crs';
 // full resolution in a tab is how you lose the tab.
 const MAX_OVERVIEW_EDGE = 1600;
 
+// geotiff.js reads the whole of the level it renders from before it shrinks it,
+// so a file without internal overviews costs its full size in memory (a 17,000 px
+// square RGBA ortho asks for over a gigabyte) and every tile decoded. Past this
+// budget the preview is skipped: the header alone still gives the size, bands,
+// CRS and pixel size, which is everything the upload checks need. The map
+// copies ingest builds afterwards have overviews, so the flight page can show it.
+const PREVIEW_BUDGET_BYTES = 256 * 1024 * 1024;
+
 // ==============================|| BAND COMBINATIONS ||============================== //
 
 /**
@@ -116,7 +124,8 @@ function tag(image, name) {
 /**
  * Decodes an orthophoto far enough to preview it and to place plot polygons on
  * it. Returns the render plus the georeferencing needed to convert map
- * coordinates into overview pixels.
+ * coordinates into overview pixels. For a file too big to render here,
+ * `overviewUrl` is null and `previewSkipped` true; everything else is filled in.
  */
 export async function readOrtho(file, { combo = 'natural' } = {}) {
   const tiff = await fromBlob(file);
@@ -167,6 +176,31 @@ export async function readOrtho(file, { combo = 'natural' } = {}) {
 
   const indices = bandIndicesFor(combo, bandCount, alphaIndex);
   const requested = [...new Set(hasAlpha ? [...indices, alphaIndex] : indices)];
+
+  const header = {
+    name: file.name,
+    bytes: file.size,
+    width,
+    height,
+    bandCount,
+    colourBandCount: hasAlpha ? alphaIndex : bandCount,
+    hasAlpha,
+    epsg,
+    crs: crsLabel(epsg, null),
+    georeferenced,
+    gsdCm: gsdCm ? Number(gsdCm.toFixed(2)) : null,
+    affine,
+    combo,
+    overviewWidth,
+    overviewHeight,
+    // ground centimetres per pixel *of the overview* — drives the nudge step
+    overviewCmPerPx: gsdCm ? Number(((gsdCm * width) / overviewWidth).toFixed(3)) : null
+  };
+
+  const bytesPerSample = Math.max(1, Math.ceil(Math.max(...(tag(base, 'BitsPerSample') || [8]).map(Number)) / 8));
+  const readCost = source.getWidth() * source.getHeight() * requested.length * bytesPerSample;
+  if (readCost > PREVIEW_BUDGET_BYTES) return { ...header, overviewUrl: null, previewSkipped: true };
+
   const rasters = await source.readRasters({
     width: overviewWidth,
     height: overviewHeight,
@@ -182,26 +216,7 @@ export async function readOrtho(file, { combo = 'natural' } = {}) {
   const imageData = compose(rasters, overviewWidth, overviewHeight, localIndices, alphaBand, alphaMax);
   const overviewUrl = await imageDataToUrl(imageData);
 
-  return {
-    name: file.name,
-    bytes: file.size,
-    width,
-    height,
-    bandCount,
-    colourBandCount: hasAlpha ? alphaIndex : bandCount,
-    hasAlpha,
-    epsg,
-    crs: crsLabel(epsg, null),
-    georeferenced,
-    gsdCm: gsdCm ? Number(gsdCm.toFixed(2)) : null,
-    affine,
-    combo,
-    overviewUrl,
-    overviewWidth,
-    overviewHeight,
-    // ground centimetres per pixel *of the overview* — drives the nudge step
-    overviewCmPerPx: gsdCm ? Number(((gsdCm * width) / overviewWidth).toFixed(3)) : null
-  };
+  return { ...header, overviewUrl, previewSkipped: false };
 }
 
 export function releaseOrtho(ortho) {

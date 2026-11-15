@@ -34,6 +34,7 @@ export default function TrialRuns() {
   // worker fills them a flight reads `uploaded` with dashes, which is the truth.
   const { data: runs, error: runsError, isLoading: runsLoading, mutate } = useFlights(trialId);
   const flagged = (runs || []).reduce((sum, run) => sum + (run.flagged || 0), 0);
+  const uploadedRun = uploaded && runs?.find((run) => run.id === uploaded.id);
 
   const crumbs = [
     { label: 'Croplytix', to: '/' },
@@ -124,8 +125,9 @@ export default function TrialRuns() {
                 </Stack>
               }
             >
-              Flight {uploaded.flightDate} uploaded.
-              {uploaded.source === 'ortho' && ' Its map copies are being built; open it to follow along.'}
+              {uploadedRun?.status === 'awaiting_upload'
+                ? `Flight ${uploaded.flightDate} is uploading. Keep this tab open until it finishes; its map copies are built after that.`
+                : `Flight ${uploaded.flightDate} uploaded. Its map copies are being built; open it to follow along.`}
             </Alert>
           )}
           {runsLoading && <LinearProgress sx={{ height: 2, mb: 2 }} />}

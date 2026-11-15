@@ -17,6 +17,7 @@ import LinearProgress from '@mui/material/LinearProgress';
 
 // project imports
 import FlightStatusChip from 'sections/trials/FlightStatusChip';
+import { FlightUploadStatus } from 'sections/trials/FlightUpload';
 
 // assets
 import CloudUploadOutlined from '@ant-design/icons/CloudUploadOutlined';
@@ -41,6 +42,12 @@ const frame = (theme) => ({
   // the frame supplies the closing line; the last row shouldn't draw its own
   '& tbody tr:last-of-type td': { borderBottom: 0 }
 });
+
+/** What a flight was made from, as the table shows it. Older flights may be pre-clipped images. */
+export function sourceLabel(flight) {
+  if (flight.source !== 'ortho') return 'Pre-clipped';
+  return flight.files?.some((file) => file.role === 'shapefile') || flight.shapefile ? 'Ortho + .shp' : 'Ortho';
+}
 
 // ==============================|| TRIALS - RUNS TABLE ||============================== //
 
@@ -102,7 +109,7 @@ export default function RunsTable({ runs = [], highlightId = null, onOpenRun, on
                 </TableCell>
                 <TableCell align="center">
                   <Typography variant="caption" color="text.secondary">
-                    {run.source === 'ortho' ? 'Ortho + .shp' : 'Pre-clipped'}
+                    {sourceLabel(run)}
                   </Typography>
                 </TableCell>
                 <TableCell sx={mono} align="center">
@@ -117,7 +124,7 @@ export default function RunsTable({ runs = [], highlightId = null, onOpenRun, on
                 </TableCell>
                 <TableCell align="center">
                   <Stack direction="row" sx={{ gap: 0.75, alignItems: 'center', justifyContent: 'center' }}>
-                    <FlightStatusChip status={run.status} />
+                    {run.status === 'awaiting_upload' ? <FlightUploadStatus flightId={run.id} /> : <FlightStatusChip status={run.status} />}
                     {run.status === 'failed' && run.error && (
                       <Tooltip title={run.error}>
                         <Box sx={{ display: 'flex', color: 'error.main', fontSize: '0.8rem' }}>

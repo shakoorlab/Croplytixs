@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { mutate } from 'swr';
 
 // material-ui
 import Box from '@mui/material/Box';
@@ -10,31 +9,27 @@ import Typography from '@mui/material/Typography';
 import Chip from '@mui/material/Chip';
 import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
-import ToggleButton from '@mui/material/ToggleButton';
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 
 // project imports
 import MainCard from 'components/MainCard';
 import PageHeader from 'components/PageHeader';
 import TrialTabs from 'sections/trials/TrialTabs';
 import { NESTED_PANEL } from 'sections/trials/surfaces';
-import { createFlight, flightsKey, useTrial } from 'api/trials';
+import { useTrial } from 'api/trials';
+import { startFlightUpload } from 'api/uploads';
 import FileDropCard from 'sections/trials/flight-setup/FileDropCard';
 import OrthoOverview from 'sections/trials/flight-setup/OrthoOverview';
 import ShapefileMapping from 'sections/trials/flight-setup/ShapefileMapping';
-import PreClippedTable from 'sections/trials/flight-setup/PreClippedTable';
 import FlightDetailsPanel from 'sections/trials/flight-setup/FlightDetailsPanel';
 import { formatBytes, inspectShapefileSelection } from 'sections/trials/flight-setup/utils';
 import { ALTITUDES } from 'sections/trials/flight-setup/constants';
 import { readOrtho, releaseOrtho } from 'sections/trials/flight-setup/geo/readOrtho';
 import { readShapefile } from 'sections/trials/flight-setup/geo/readShapefile';
 import { gridCoverage, toOverviewPlots } from 'sections/trials/flight-setup/geo/toOverviewPlots';
-import { DEFAULT_FILENAME_PATTERN, MOCK_CLIPPED_FILES } from 'sections/trials/flight-setup/mockData';
 
 // assets
 import PictureOutlined from '@ant-design/icons/PictureOutlined';
 import FileZipOutlined from '@ant-design/icons/FileZipOutlined';
-import FolderOpenOutlined from '@ant-design/icons/FolderOpenOutlined';
 import BorderOuterOutlined from '@ant-design/icons/BorderOuterOutlined';
 
 const EMPTY_MAPPING = { identity: 'single', plot_id: '', row: '', col: '', genotype: '', rep: '' };
@@ -76,8 +71,6 @@ export default function FlightDateSetup() {
   const navigate = useNavigate();
   const { data: trial } = useTrial(trialId);
 
-  const [sourceMode, setSourceMode] = useState('ortho');
-
   // --- staged inputs · nothing is staged on arrival -------------------------
   const [ortho, setOrtho] = useState(null);
   const [orthoError, setOrthoError] = useState(null);
@@ -85,15 +78,11 @@ export default function FlightDateSetup() {
   const [shapefile, setShapefile] = useState(null);
   const [shapefileError, setShapefileError] = useState(null);
   const [shapefileBusy, setShapefileBusy] = useState(false);
-  const [clipped, setClipped] = useState(null);
 
   // --- grid alignment ------------------------------------------------------
   const [offset, setOffset] = useState({ dxCm: 0, dyCm: 0, rotDeg: 0 });
   const [insetCm, setInsetCm] = useState(10);
   const [mapping, setMapping] = useState(EMPTY_MAPPING);
-
-  // --- pre-clipped mode ----------------------------------------------------
-  const [pattern, setPattern] = useState(DEFAULT_FILENAME_PATTERN);
 
   // --- flight details + upload ----------------------------------------------
   // Only facts about the flight. The model and area denominator are chosen when
@@ -102,11 +91,12 @@ export default function FlightDateSetup() {
     flightDate: '',
     capture: '12-ms'
   });
+  // Only while the API records the flight and opens its upload sessions — a
+  // moment. The bytes then go in the background, and this page hands over to
+  // the Flights table, where the upload's progress shows.
   const [running, setRunning] = useState(false);
-  const [progress, setProgress] = useState(0);
   const [submitError, setSubmitError] = useState(null);
 
-  const isOrthoMode = sourceMode === 'ortho';
   const hasGrid = Boolean(ortho && shapefile);
 
   // real polygons, projected through the ortho's transform into overview pixels
@@ -116,7 +106,7 @@ export default function FlightDateSetup() {
   );
 
   const coverage = useMemo(() => (plots.length ? gridCoverage(plots, ortho) : 1), [plots, ortho]);
-  const plotCount = isOrthoMode ? plots.length || shapefile?.featureCount || 0 : clipped?.count || 0;
+  const plotCount = plots.length || shapefile?.featureCount || 0;
 
   // the overview render is an object URL; let it go when the page does
   useEffect(() => () => releaseOrtho(ortho), [ortho]);
@@ -125,47 +115,30 @@ export default function FlightDateSetup() {
   // fine and then lands nowhere near the imagery, so this is a hard stop.
   const crsAgree = hasGrid && (shapefile.coordinateSpace === 'wgs84' ? Boolean(ortho.epsg) : Number(ortho.epsg) === Number(shapefile.epsg));
 
+  // The shapefile is optional: without one the flight is stored with no plot
+  // grid. With one, it has to fit the ortho before anything is sent.
   const blockers = useMemo(() => {
     const list = [];
-    if (isOrthoMode) {
-      if (!ortho) list.push('No orthophoto staged.');
-      if (!shapefile) list.push('No plot shapefile staged.');
-      if (orthoError) list.push('Orthophoto could not be read.');
-      if (shapefileError) list.push('Shapefile could not be read.');
-      if (projectionError) list.push('Plot polygons could not be placed on the ortho.');
-      if (hasGrid && !crsAgree) list.push(`CRS mismatch — ortho is ${ortho.crs}, shapefile is ${shapefile.crs}.`);
-      if (hasGrid && crsAgree && !projectionError && coverage < 0.5)
-        list.push('Most plots fall outside the orthophoto — wrong shapefile, or wrong flight?');
-      if (shapefile && mapping.identity === 'grid' && !(mapping.row && mapping.col))
-        list.push('Row and column fields are not both mapped.');
-      if (shapefile && mapping.identity !== 'grid' && !mapping.plot_id) list.push('Plot ID field is not mapped.');
-    } else if (!clipped) {
-      list.push('No plot images staged.');
-    }
+    if (!ortho) list.push('No orthophoto staged.');
+    if (orthoError) list.push('Orthophoto could not be read.');
+    if (shapefileError) list.push('Shapefile could not be read.');
+    if (projectionError) list.push('Plot polygons could not be placed on the ortho.');
+    if (hasGrid && !crsAgree) list.push(`CRS mismatch — ortho is ${ortho.crs}, shapefile is ${shapefile.crs}.`);
+    if (hasGrid && crsAgree && !projectionError && coverage < 0.5)
+      list.push('Most plots fall outside the orthophoto — wrong shapefile, or wrong flight?');
+    if (shapefile && mapping.identity === 'grid' && !(mapping.row && mapping.col)) list.push('Row and column fields are not both mapped.');
+    if (shapefile && mapping.identity !== 'grid' && !mapping.plot_id) list.push('Plot ID field is not mapped.');
     if (!config.flightDate) list.push('Flight date is not set.');
     return list;
-  }, [
-    isOrthoMode,
-    ortho,
-    orthoError,
-    shapefile,
-    shapefileError,
-    projectionError,
-    hasGrid,
-    crsAgree,
-    coverage,
-    mapping,
-    clipped,
-    config.flightDate
-  ]);
+  }, [ortho, orthoError, shapefile, shapefileError, projectionError, hasGrid, crsAgree, coverage, mapping, config.flightDate]);
 
   // What the Upload button is about to send, shown under it.
   const uploadSummary = useMemo(() => {
-    const files = isOrthoMode ? [ortho?.file, ...(shapefile?.files || [])].filter(Boolean) : clipped?.files || [];
+    const files = [ortho?.file, ...(shapefile?.files || [])].filter(Boolean);
     if (!files.length) return null;
     const bytes = files.reduce((sum, file) => sum + file.size, 0);
-    return `${formatBytes(bytes)} · ${files.length} file${files.length === 1 ? '' : 's'}${plotCount ? ` · ${plotCount} plots` : ''}`;
-  }, [isOrthoMode, ortho, shapefile, clipped, plotCount]);
+    return `${formatBytes(bytes)} · ${files.length} file${files.length === 1 ? '' : 's'}${plotCount ? ` · ${plotCount} plots` : ' · no plot grid'}`;
+  }, [ortho, shapefile, plotCount]);
 
   // ---- real decode --------------------------------------------------------
   // Everything the panel shows about the ortho — band count, CRS, GSD, the
@@ -243,12 +216,6 @@ export default function FlightDateSetup() {
     }
   };
 
-  const handleClippedSelect = (fileList) => {
-    const files = Array.from(fileList);
-    const bytes = files.reduce((sum, f) => sum + f.size, 0);
-    setClipped({ count: files.length, bytes, rows: MOCK_CLIPPED_FILES.slice(0, 5), files });
-  };
-
   /**
    * With only a roster *count* on the trial (the plot map CSV is optional), this
    * is the honest comparison available: how many polygons carry a usable plot id,
@@ -271,11 +238,11 @@ export default function FlightDateSetup() {
   const flightsUrl = `/trials/${trialId}/flights`;
 
   /**
-   * Upload = one multipart POST: a JSON `meta` part describing the flight, plus
-   * the raw files. The API streams the files into the bucket, writes one flight
-   * record and starts ingest. Progress here is *upload* progress (bytes leaving
-   * the browser). On success the user goes back to the Flights table, where the
-   * new flight is highlighted; everything after this happens from its own page.
+   * Upload: the API records the flight and opens one upload session per file,
+   * then the files go straight from this browser to the bucket, in the
+   * background (api/uploads.js). This page waits only for the first step, then
+   * hands over to the Flights table, where the new flight shows its progress.
+   * The upload carries on while the user moves around the app.
    */
   const handleUpload = async () => {
     const pick = (obj, keys) => Object.fromEntries(keys.filter((k) => obj?.[k] !== undefined).map((k) => [k, obj[k]]));
@@ -283,58 +250,43 @@ export default function FlightDateSetup() {
 
     const meta = {
       flightDate: config.flightDate,
-      source: sourceMode,
+      source: 'ortho',
       capture: config.capture,
       captureLabel: captureOption?.label,
       plots: plotCount,
       offset,
       insetCm,
-      mapping,
-      ortho: isOrthoMode ? pick(ortho, ['name', 'bytes', 'width', 'height', 'bandCount', 'colourBandCount', 'epsg', 'crs', 'gsdCm']) : null,
-      shapefile: isOrthoMode ? pick(shapefile, ['name', 'bytes', 'members', 'featureCount', 'fields', 'epsg', 'crs']) : null,
-      filenamePattern: isOrthoMode ? null : pattern
+      mapping: shapefile ? mapping : {},
+      ortho: pick(ortho, ['name', 'bytes', 'width', 'height', 'bandCount', 'colourBandCount', 'epsg', 'crs', 'gsdCm']),
+      shapefile: shapefile ? pick(shapefile, ['name', 'bytes', 'members', 'featureCount', 'fields', 'epsg', 'crs']) : null
     };
+    const files = [{ role: 'ortho', file: ortho.file }, ...(shapefile?.files || []).map((file) => ({ role: 'shapefile', file }))];
 
     setSubmitError(null);
-    setProgress(0);
     setRunning(true);
     try {
-      const flight = await createFlight(
-        trialId,
-        {
-          meta,
-          ortho: isOrthoMode ? ortho.file : null,
-          shapefile: isOrthoMode ? shapefile.files : [],
-          clipped: isOrthoMode ? [] : clipped.files
-        },
-        { onProgress: setProgress }
-      );
-      // the Flights tab may already hold a cached list — refetch it so the new
-      // flight is in the table it is about to show
-      mutate(flightsKey(trialId));
+      const flight = await startFlightUpload(trialId, meta, files);
       navigate(flightsUrl, { state: { uploaded: { id: flight.id, flightDate: flight.flightDate, source: flight.source } } });
     } catch (error) {
       setSubmitError(error.message);
       setRunning(false);
-      setProgress(0);
     }
   };
 
-  // Full width and last, so Upload is the final step: after the shapefile fields
-  // (or the image table in pre-clipped mode).
+  // Full width and last, so Upload is the final step, after the shapefile fields.
   const detailsPanel = (
     <Stack sx={{ gap: 2 }}>
       <FlightDetailsPanel
         values={config}
         onChange={setConfig}
-        gsdCm={isOrthoMode ? ortho?.gsdCm : undefined}
-        gsdSource={isOrthoMode ? 'Read from the orthophoto’s georeferencing.' : 'Read from the GeoTIFF’s georeferencing.'}
+        gsdCm={ortho?.gsdCm}
+        gsdSource="Read from the orthophoto’s georeferencing."
         uploading={running}
-        progress={progress}
+        progress={null}
         canUpload={blockers.length === 0}
         blockers={blockers}
-        inputsStaged={isOrthoMode ? Boolean(ortho) : Boolean(clipped)}
-        actualBands={isOrthoMode ? ortho?.colourBandCount : null}
+        inputsStaged={Boolean(ortho)}
+        actualBands={ortho?.colourBandCount}
         uploadSummary={uploadSummary}
         onUpload={handleUpload}
         onOverrideGsd={() => {
@@ -375,37 +327,10 @@ export default function FlightDateSetup() {
       <Grid size={12}>
         <TrialTabs trialId={trialId} current="flights" flagged={trial?.flagged || 0}>
           <Grid container rowSpacing={2.5} columnSpacing={2.75}>
-            {/* ---- source mode ---- */}
-            <Grid size={12}>
-              <Stack direction="row" sx={{ gap: 1.5, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                <Stack sx={{ gap: 0.75 }}>
-                  <Typography id="source-mode-label" variant="caption" color="text.secondary">
-                    Source
-                  </Typography>
-                  <ToggleButtonGroup
-                    exclusive
-                    size="small"
-                    aria-labelledby="source-mode-label"
-                    value={sourceMode}
-                    onChange={(event, value) => value && setSourceMode(value)}
-                    disabled={running}
-                    sx={{
-                      '& .MuiToggleButton-root.Mui-selected': {
-                        color: 'primary.main',
-                        bgcolor: 'primary.lighter',
-                        borderColor: 'primary.light',
-                        '&:hover': { bgcolor: 'primary.lighter' }
-                      }
-                    }}
-                  >
-                    <ToggleButton value="ortho">Ortho + plot shapefile</ToggleButton>
-                    <ToggleButton value="clipped">Pre-clipped plot images</ToggleButton>
-                  </ToggleButtonGroup>
-                </Stack>
-
-                <Box sx={{ flex: 1 }} />
-
-                {hasGrid && (
+            {/* ---- do the ortho and the shapefile describe the same ground? ---- */}
+            {hasGrid && (
+              <Grid size={12}>
+                <Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
                   <Chip
                     size="small"
                     label={crsAgree ? `${ortho.crs} · ortho and .shp agree` : `CRS mismatch · ${ortho.crs} vs ${shapefile.crs}`}
@@ -414,140 +339,108 @@ export default function FlightDateSetup() {
                       bgcolor: crsAgree ? 'success.lighter' : 'error.lighter'
                     }}
                   />
-                )}
-              </Stack>
-            </Grid>
+                </Stack>
+              </Grid>
+            )}
 
             {/* ---- one full-width column: files, preview, shapefile fields, then flight details + upload ---- */}
             <Grid size={12}>
               <Stack sx={{ gap: 2.5 }}>
-                {isOrthoMode ? (
-                  <>
-                    <Grid container spacing={2}>
-                      <Grid size={{ xs: 12, sm: 6 }}>
-                        <FileDropCard
-                          label="Drop orthophoto"
-                          hint=".tif / .tiff — GeoTIFF preferred"
-                          accept=".tif,.tiff"
-                          icon={<PictureOutlined />}
-                          disabled={running}
-                          busy={orthoBusy}
-                          error={orthoError}
-                          staged={
-                            ortho && {
-                              name: ortho.name,
-                              meta: [
-                                formatBytes(ortho.bytes),
-                                `${ortho.width} × ${ortho.height} px`,
-                                `${ortho.bandCount}-band`,
-                                ortho.gsdCm ? `${ortho.gsdCm} cm/px` : 'no GSD',
-                                ortho.crs
-                              ]
-                            }
-                          }
-                          onSelect={handleOrthoSelect}
-                          onClear={() => {
-                            releaseOrtho(ortho);
-                            setOrtho(null);
-                            setOrthoError(null);
-                          }}
-                        />
-                      </Grid>
-                      <Grid size={{ xs: 12, sm: 6 }}>
-                        <FileDropCard
-                          label="Drop plot shapefile"
-                          hint=".zip, or select .shp .shx .dbf .prj together"
-                          accept=".zip,.shp,.shx,.dbf,.prj,.cpg"
-                          multiple
-                          icon={<FileZipOutlined />}
-                          disabled={running}
-                          busy={shapefileBusy}
-                          error={shapefileError}
-                          staged={
-                            shapefile && {
-                              name: shapefile.name,
-                              meta: [shapefile.members.join(' '), `${shapefile.featureCount} polygons`, shapefile.crs]
-                            }
-                          }
-                          onSelect={handleShapefileSelect}
-                          onClear={() => {
-                            setShapefile(null);
-                            setShapefileError(null);
-                            setMapping(EMPTY_MAPPING);
-                          }}
-                        />
-                      </Grid>
-                    </Grid>
-
-                    {hasGrid ? (
-                      <OrthoOverview
-                        ortho={ortho}
-                        plots={plots}
-                        offset={offset}
-                        onOffsetChange={setOffset}
-                        insetCm={insetCm}
-                        onInsetChange={setInsetCm}
-                        onComboChange={handleComboChange}
-                        busy={orthoBusy}
-                        disabled={running}
-                      />
-                    ) : (
-                      <MainCard content={false} sx={NESTED_PANEL}>
-                        <Stack sx={{ alignItems: 'center', gap: 1, py: 7, px: 3 }}>
-                          <Box sx={{ fontSize: '1.75rem', color: 'text.disabled', display: 'flex' }}>
-                            <BorderOuterOutlined />
-                          </Box>
-                          <Typography variant="subtitle1">Grid alignment preview</Typography>
-                          <Typography variant="body2" color="text.secondary" align="center" sx={{ maxWidth: 440 }}>
-                            {!ortho && !shapefile && 'Add both an orthophoto and its plot shapefile to check the grid lands on the plots.'}
-                            {ortho && !shapefile && 'Orthophoto staged. Add the plot shapefile to draw the plot boundaries over it.'}
-                            {!ortho && shapefile && 'Shapefile staged. Add the orthophoto to see where those plots fall.'}
-                          </Typography>
-                        </Stack>
-                      </MainCard>
-                    )}
-
-                    <ShapefileMapping
-                      fields={shapefile?.fields || []}
-                      mapping={mapping}
-                      onMappingChange={setMapping}
-                      roster={roster}
-                      disabled={running || !shapefile}
-                    />
-
-                    {detailsPanel}
-                  </>
-                ) : (
-                  <>
+                <Grid container spacing={2}>
+                  <Grid size={{ xs: 12, sm: 6 }}>
                     <FileDropCard
-                      label="Drop clipped plot images"
-                      hint="A folder of .tif / .tiff / .png — one file per plot"
-                      accept=".tif,.tiff,.png"
-                      multiple
-                      directory
-                      icon={<FolderOpenOutlined />}
+                      label="Drop orthophoto"
+                      hint=".tif / .tiff — GeoTIFF preferred"
+                      accept=".tif,.tiff"
+                      icon={<PictureOutlined />}
                       disabled={running}
+                      busy={orthoBusy}
+                      error={orthoError}
                       staged={
-                        clipped && {
-                          name: `${clipped.count} files staged`,
-                          meta: [formatBytes(clipped.bytes), `${clipped.count} images`]
+                        ortho && {
+                          name: ortho.name,
+                          meta: [
+                            formatBytes(ortho.bytes),
+                            `${ortho.width} × ${ortho.height} px`,
+                            `${ortho.bandCount}-band`,
+                            ortho.gsdCm ? `${ortho.gsdCm} cm/px` : 'no GSD',
+                            ortho.crs
+                          ]
                         }
                       }
-                      onSelect={handleClippedSelect}
-                      onClear={() => setClipped(null)}
+                      onSelect={handleOrthoSelect}
+                      onClear={() => {
+                        releaseOrtho(ortho);
+                        setOrtho(null);
+                        setOrthoError(null);
+                      }}
                     />
-                    <PreClippedTable
-                      pattern={pattern}
-                      onPatternChange={setPattern}
-                      rows={clipped?.rows || []}
-                      totalCount={clipped?.count || 0}
-                      parsedCount={clipped?.count || 0}
-                      disabled={running || !clipped}
+                  </Grid>
+                  <Grid size={{ xs: 12, sm: 6 }}>
+                    <FileDropCard
+                      label="Drop plot shapefile (optional)"
+                      hint=".zip, or select .shp .shx .dbf .prj (and .cpg) together"
+                      accept=".zip,.shp,.shx,.dbf,.prj,.cpg"
+                      multiple
+                      icon={<FileZipOutlined />}
+                      disabled={running}
+                      busy={shapefileBusy}
+                      error={shapefileError}
+                      staged={
+                        shapefile && {
+                          name: shapefile.name,
+                          meta: [shapefile.members.join(' '), `${shapefile.featureCount} polygons`, shapefile.crs]
+                        }
+                      }
+                      onSelect={handleShapefileSelect}
+                      onClear={() => {
+                        setShapefile(null);
+                        setShapefileError(null);
+                        setMapping(EMPTY_MAPPING);
+                      }}
                     />
+                  </Grid>
+                </Grid>
 
-                    {detailsPanel}
-                  </>
+                {hasGrid ? (
+                  <OrthoOverview
+                    ortho={ortho}
+                    plots={plots}
+                    offset={offset}
+                    onOffsetChange={setOffset}
+                    insetCm={insetCm}
+                    onInsetChange={setInsetCm}
+                    onComboChange={handleComboChange}
+                    busy={orthoBusy}
+                    disabled={running}
+                  />
+                ) : (
+                  <MainCard content={false} sx={NESTED_PANEL}>
+                    <Stack sx={{ alignItems: 'center', gap: 1, py: 7, px: 3 }}>
+                      <Box sx={{ fontSize: '1.75rem', color: 'text.disabled', display: 'flex' }}>
+                        <BorderOuterOutlined />
+                      </Box>
+                      <Typography variant="subtitle1">Grid alignment preview</Typography>
+                      <Typography variant="body2" color="text.secondary" align="center" sx={{ maxWidth: 440 }}>
+                        {!ortho && !shapefile && 'Add both an orthophoto and its plot shapefile to check the grid lands on the plots.'}
+                        {ortho &&
+                          !shapefile &&
+                          'Orthophoto staged. Add its plot shapefile to check the plots line up, or upload without one: the flight is stored without a plot grid.'}
+                        {!ortho && shapefile && 'Shapefile staged. Add the orthophoto to see where those plots fall.'}
+                      </Typography>
+                    </Stack>
+                  </MainCard>
                 )}
+
+                <ShapefileMapping
+                  fields={shapefile?.fields || []}
+                  mapping={mapping}
+                  onMappingChange={setMapping}
+                  roster={roster}
+                  disabled={running || !shapefile}
+                />
+
+                {detailsPanel}
               </Stack>
             </Grid>
           </Grid>

@@ -9,12 +9,16 @@ import { FLIGHT_STATUSES } from 'api/trials';
 import capitalize from 'utils/capitalize';
 
 const COLORS = {
+  awaiting_upload: 'warning',
   uploaded: 'secondary',
   queued: 'secondary',
   running: 'primary',
   complete: 'success',
   failed: 'error'
 };
+
+// Statuses whose stored value doesn't read as a word.
+const LABELS = { awaiting_upload: 'Uploading' };
 
 // ==============================|| TRIALS - FLIGHT STATUS CHIP ||============================== //
 
@@ -28,7 +32,7 @@ export default function FlightStatusChip({ status, size = 'small', sx }) {
     <Tooltip title={FLIGHT_STATUSES[status] || ''}>
       <Chip
         size={size}
-        label={status ? capitalize(status) : 'Unknown'}
+        label={LABELS[status] || (status ? capitalize(status) : 'Unknown')}
         sx={{ bgcolor: `${color}.lighter`, color: `${color}.main`, ...sx }}
       />
     </Tooltip>

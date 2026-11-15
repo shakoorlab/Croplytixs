@@ -14,6 +14,7 @@ import MainCard from 'components/MainCard';
 import InfoTip from 'components/InfoTip';
 import FlightStatusChip from 'sections/trials/FlightStatusChip';
 import MapCopies from 'sections/trials/MapCopies';
+import FlightUploadControls from 'sections/trials/FlightUpload';
 import LifecycleChip from 'sections/models/LifecycleChip';
 import { NESTED_PANEL } from 'sections/trials/surfaces';
 import { formatBytes } from 'sections/trials/flight-setup/utils';
@@ -169,7 +170,12 @@ function describeOffset({ dxCm = 0, dyCm = 0, rotDeg = 0 }) {
  * term. It is also the reproducibility record: every value that shapes a
  * result (files, grid nudge, model version) is here.
  */
-export default function FlightSummary({ trialId, flight, onChanged }) {
+// The download link streams the file through the API, and Cloud Run answers at
+// most 32 MiB. Bigger files get signed download links along with the map viewer.
+const MAX_DOWNLOAD_BYTES = 31 * 1024 * 1024;
+
+export default function FlightSummary({ trialId, flight, onChanged, onUploadCancelled }) {
+  const awaitingUpload = flight.status === 'awaiting_upload';
   const [downloadError, setDownloadError] = useState(null);
   const model = MODELS.find((candidate) => candidate.id === flight.modelId || candidate.label === flight.model);
   const { ortho, shapefile, mapping, offset } = flight;
@@ -215,10 +221,21 @@ export default function FlightSummary({ trialId, flight, onChanged }) {
                 </Typography>
               )}
             </Row>
+            {awaitingUpload && (
+              <Row label="Upload">
+                <FlightUploadControls key={flight.id} trialId={trialId} flight={flight} onCancelled={onUploadCancelled} />
+              </Row>
+            )}
             {flight.source === 'ortho' && (
               <Row label="Map copies" help={HELP.mapCopies}>
-                {/* keyed so a message about one flight doesn't follow you to the next */}
-                <MapCopies key={flight.id} trialId={trialId} flight={flight} onChanged={onChanged} />
+                {awaitingUpload ? (
+                  <Typography variant="body2" color="text.secondary">
+                    Built once the upload finishes
+                  </Typography>
+                ) : (
+                  /* keyed so a message about one flight doesn't follow you to the next */
+                  <MapCopies key={flight.id} trialId={trialId} flight={flight} onChanged={onChanged} />
+                )}
               </Row>
             )}
           </SectionBox>
@@ -321,29 +338,40 @@ export default function FlightSummary({ trialId, flight, onChanged }) {
                 </Typography>
               </Row>
             )}
-            {flight.files?.length > 0 && (
+            {flight.files?.length > 0 && !awaitingUpload && (
               <Row label="Download">
                 <Stack sx={{ gap: 0.5 }}>
-                  {flight.files.map((file) => (
-                    <Link
-                      key={file.key}
-                      component="button"
-                      type="button"
-                      underline="hover"
-                      onClick={() => download(file)}
-                      sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, textAlign: 'left', minWidth: 0 }}
-                    >
-                      <Box component="span" sx={{ display: 'flex', fontSize: '0.75rem', alignSelf: 'center' }}>
-                        <DownloadOutlined />
-                      </Box>
-                      <Typography component="span" variant="caption" sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
-                        {FILE_ROLES[file.role] || file.role}
-                      </Typography>
-                      <Typography component="span" variant="caption" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
-                        {file.name} · {formatBytes(file.bytes)}
-                      </Typography>
-                    </Link>
-                  ))}
+                  {flight.files.map((file) =>
+                    file.bytes > MAX_DOWNLOAD_BYTES ? (
+                      <Stack key={file.key} direction="row" sx={{ alignItems: 'baseline', gap: 0.75, minWidth: 0 }}>
+                        <Typography component="span" variant="caption" sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                          {FILE_ROLES[file.role] || file.role}
+                        </Typography>
+                        <Typography component="span" variant="caption" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
+                          {file.name} · {formatBytes(file.bytes)} · too large to download here yet
+                        </Typography>
+                      </Stack>
+                    ) : (
+                      <Link
+                        key={file.key}
+                        component="button"
+                        type="button"
+                        underline="hover"
+                        onClick={() => download(file)}
+                        sx={{ display: 'flex', alignItems: 'baseline', gap: 0.75, textAlign: 'left', minWidth: 0 }}
+                      >
+                        <Box component="span" sx={{ display: 'flex', fontSize: '0.75rem', alignSelf: 'center' }}>
+                          <DownloadOutlined />
+                        </Box>
+                        <Typography component="span" variant="caption" sx={{ fontWeight: 600, whiteSpace: 'nowrap' }}>
+                          {FILE_ROLES[file.role] || file.role}
+                        </Typography>
+                        <Typography component="span" variant="caption" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
+                          {file.name} · {formatBytes(file.bytes)}
+                        </Typography>
+                      </Link>
+                    )
+                  )}
                   {downloadError && (
                     <Typography variant="caption" color="error" role="alert">
                       {downloadError}
@@ -406,5 +434,6 @@ export default function FlightSummary({ trialId, flight, onChanged }) {
 FlightSummary.propTypes = {
   trialId: PropTypes.string.isRequired,
   flight: PropTypes.object.isRequired,
-  onChanged: PropTypes.func.isRequired
+  onChanged: PropTypes.func.isRequired,
+  onUploadCancelled: PropTypes.func
 };

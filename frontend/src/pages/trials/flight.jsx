@@ -29,6 +29,7 @@ import FlightSummary from 'sections/trials/FlightSummary';
 import FlightProgress from 'sections/trials/FlightProgress';
 import { NESTED_PANEL_FRAMED } from 'sections/trials/surfaces';
 import { useFlight, useTrial } from 'api/trials';
+import { sourceLabel } from 'sections/trials/RunsTable';
 import formatRelative from 'utils/formatRelative';
 
 // assets
@@ -136,7 +137,7 @@ export default function FlightDetail() {
           title={flight ? `Flight ${flight.flightDate}` : error ? 'Could not load flight' : 'Loading flight…'}
           subtitle={
             flight
-              ? `${flight.captureLabel || flight.capture} · ${flight.source === 'ortho' ? 'Ortho + .shp' : 'Pre-clipped'} · ${flight.plots} plots · ${flight.createdBy || 'Unknown'} · ${formatRelative(flight.createdAt)}`
+              ? `${flight.captureLabel || flight.capture} · ${sourceLabel(flight)} · ${flight.plots ? `${flight.plots} plots` : 'no plot grid'} · ${flight.createdBy || 'Unknown'} · ${formatRelative(flight.createdAt)}`
               : undefined
           }
           actions={
@@ -170,7 +171,12 @@ export default function FlightDetail() {
             <Grid container rowSpacing={2.5} columnSpacing={2.75}>
               {/* ---- what this flight is: on top, full width ---- */}
               <Grid size={12}>
-                <FlightSummary trialId={trialId} flight={flight} onChanged={mutate} />
+                <FlightSummary
+                  trialId={trialId}
+                  flight={flight}
+                  onChanged={mutate}
+                  onUploadCancelled={() => navigate(`/trials/${trialId}`, { replace: true })}
+                />
               </Grid>
 
               {/* ---- results, or how far the flight is from having them ---- */}
