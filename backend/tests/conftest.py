@@ -19,6 +19,7 @@ os.environ["STORAGE_BACKEND"] = "local"
 os.environ["DB_BACKEND"] = "memory"
 os.environ["AUTH_PROJECT_ID"] = "test-project"  # the start-up check needs one; never used to fetch keys
 os.environ["INGEST_RUNNER"] = "off"  # route tests upload fake TIFFs; tests/test_ingest.py turns it on
+os.environ["PROCESS_RUNNER"] = "off"  # processing needs PyTorch; tests/test_process.py runs it directly
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

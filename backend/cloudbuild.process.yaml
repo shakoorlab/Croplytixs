@@ -1,0 +1,17 @@
+# Builds the processing job's image from Dockerfile.process and pushes it to the
+# repository Cloud Run's source deploys already use. From backend/:
+#
+#   gcloud builds submit --config cloudbuild.process.yaml .
+#
+# (`gcloud run jobs deploy --source .` can't do this: it builds ./Dockerfile,
+# which is the API's.) The default build machine is inside the free 2,500
+# build-minutes a month; a build takes about 5–8 minutes, mostly PyTorch's download.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-f", "Dockerfile.process", "-t", "${_IMAGE}", "."]
+images: ["${_IMAGE}"]
+substitutions:
+  _IMAGE: us-central1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/croplytix-process:latest
+options:
+  dynamicSubstitutions: true
+timeout: 1800s

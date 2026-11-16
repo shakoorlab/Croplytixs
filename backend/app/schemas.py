@@ -154,6 +154,36 @@ class Ingest(BaseModel):
     readFrom: Literal["mount", "copy"] | None = None
 
 
+class Processing(BaseModel):
+    """The latest processing run (app/process.py). `version` is the result
+    version it writes; a failed run leaves the previous result current."""
+
+    state: Literal["queued", "running", "complete", "failed"]
+    version: int
+    modelId: str | None = None
+    queuedAt: str | None = None
+    startedAt: str | None = None
+    finishedAt: str | None = None
+    stage: str | None = None  # what a running job is doing, in words
+    error: str | None = None
+
+
+class CurrentResult(BaseModel):
+    """A summary of the flight's current result version, so lists can show it
+    without reading the result itself."""
+
+    id: str
+    version: int
+    createdAt: str
+    modelId: str
+    modelLabel: str
+    plots: int
+    meanCover: float
+    flaggedTotal: int
+    canopyCountedM2: float
+    warnings: int = 0
+
+
 class Flight(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -177,6 +207,72 @@ class Flight(BaseModel):
     uploadedAt: str | None = None
     files: list[StoredFile] = []
     ingest: Ingest | None = None  # source=ortho flights only
+    processing: Processing | None = None
+    result: CurrentResult | None = None
+    resultCount: int = 0  # result versions issued so far
+
+
+class ProcessRequest(BaseModel):
+    modelId: str | None = None  # the default model when left out (app/model_registry.py)
+
+
+class PlotResult(BaseModel):
+    """One plot of a result. Areas are the watershed's (canopy assigned to the
+    plot, including past its box); `cover` is canopy inside the box as a share
+    of the box. See app/pipeline/report.py."""
+
+    model_config = ConfigDict(extra="allow")
+
+    plotId: str
+    file: str
+    row: int | None = None
+    col: int | None = None
+    genotype: str | None = None
+    rep: str | None = None
+    areaCm2: float
+    areaM2: float
+    boxAreaM2: float
+    boxCanopyM2: float
+    cover: float
+    gainM2: float
+    cutByReachM2: float
+    lostToNeighbourM2: float
+    neighbours: list[str] = []
+    bareCentre: bool = False
+    confidence: float
+    flags: list[str] = []
+    flag: str | None = None
+    flagLabel: str | None = None
+    qc: str
+
+
+class ResultVersion(BaseModel):
+    version: int
+    createdAt: str
+    modelId: str
+    modelLabel: str
+    plots: int
+    meanCover: float
+    current: bool
+
+
+class FlightResults(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    flightId: str
+    trialId: str
+    version: int
+    createdAt: str
+    current: bool
+    model: dict[str, Any]
+    settings: dict[str, Any]
+    field: dict[str, Any]
+    summary: dict[str, Any]
+    warnings: list[str] = []
+    timings: dict[str, Any] = {}
+    plots: list[PlotResult]
+    versions: list[ResultVersion]
 
 
 FlightUploads.model_rebuild()

@@ -83,6 +83,24 @@ class Settings(BaseSettings):
     # createImageBitmap. Change it and re-run ingest to compare.
     VIEW_COMPRESSION: Literal["WEBP", "JPEG"] = "WEBP"
 
+    # --- processing: canopy per plot (app/process.py) -------------------------
+    # Where it runs, as for ingest: "cloudrun" starts the job PROCESS_JOB in
+    # INGEST_REGION; "inline" runs it inside the API process (local runs, with
+    # requirements-process.txt and CPU PyTorch installed); "off" only records
+    # the request (tests).
+    PROCESS_RUNNER: Literal["inline", "cloudrun", "off"] = "inline"
+    PROCESS_JOB: str = "croplytix-process"
+    # Start processing as soon as ingest has built the map copies, for flights
+    # that have a plot grid. Off: processing waits for the Process button.
+    PROCESS_AFTER_INGEST: bool = True
+    # The job's --task-timeout; a run still "running" 5 minutes past it is
+    # reported as failed, as for ingest.
+    PROCESS_TIMEOUT_MINUTES: int = 60
+    # The largest field, in millions of pixels at the model's pixel size, a run
+    # takes on. The watershed holds the whole field: about 40 bytes a pixel,
+    # so 150 MP is ~6 GB of the job's 8 GiB (about 8 ha at 2.3 cm).
+    PROCESS_MAX_MEGAPIXELS: int = 150
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

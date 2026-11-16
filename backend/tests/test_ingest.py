@@ -211,7 +211,9 @@ def test_completed_upload_queues_ingest_and_inline_runs_it(client, trial, store,
     after = client.get(f"/api/trials/{trial['id']}/flights/{flight['id']}").json()
     assert after["ingest"]["state"] == "complete", after["ingest"]
     assert store.exists(after["ingest"]["view"]["key"])
-    assert after["status"] == "uploaded", "ingest is not processing; status is the worker's"
+    # The flight has a plot grid, so ingest queued processing (which is off in tests).
+    assert after["status"] == "queued"
+    assert after["processing"]["state"] == "queued" and after["processing"]["version"] == 1
 
 
 def test_runner_off_leaves_the_flight_queued(client, trial, tmp_path):

@@ -86,6 +86,14 @@ class Repo(Protocol):
     def get_flight_unscoped(self, flight_id: str) -> Doc | None:
         """For jobs only: they are handed a flight id by the API, not by a user."""
 
+    # results — one per processing run, never overwritten. A result doc carries
+    # `id` ("{flightId}:v{version}"), `flightId`, `accountId` and `version`, and
+    # is only ever reached through its flight, which is account-scoped.
+    def create_result(self, doc: Doc) -> Doc: ...
+    def get_result(self, result_id: str) -> Doc | None: ...
+    def list_results(self, flight_id: str) -> list[Doc]:
+        """Newest version first."""
+
     def describe(self) -> str: ...
 
 
@@ -96,6 +104,7 @@ class MemoryRepo:
     def __init__(self):
         self._trials: dict[str, Doc] = {}  # by trial_key
         self._flights: dict[str, Doc] = {}
+        self._results: dict[str, Doc] = {}
 
     def create_trial(self, doc: Doc) -> Doc:
         self._trials[trial_key(doc["accountId"], doc["id"])] = dict(doc)
@@ -142,6 +151,18 @@ class MemoryRepo:
         doc = self._flights.get(flight_id)
         return dict(doc) if doc else None
 
+    def create_result(self, doc: Doc) -> Doc:
+        self._results[doc["id"]] = dict(doc)
+        return doc
+
+    def get_result(self, result_id: str) -> Doc | None:
+        doc = self._results.get(result_id)
+        return dict(doc) if doc else None
+
+    def list_results(self, flight_id: str) -> list[Doc]:
+        rows = [dict(d) for d in self._results.values() if d.get("flightId") == flight_id]
+        return sorted(rows, key=lambda d: d.get("version", 0), reverse=True)
+
     def describe(self) -> str:
         return "memory"
 
@@ -152,6 +173,7 @@ class MemoryRepo:
 class FirestoreRepo:
     TRIALS = "trials"
     FLIGHTS = "flights"
+    RESULTS = "results"
 
     def __init__(self, project: str | None = None, database: str = "(default)"):
         from google.cloud import firestore
@@ -224,6 +246,20 @@ class FirestoreRepo:
     def get_flight_unscoped(self, flight_id: str) -> Doc | None:
         snap = self._db.collection(self.FLIGHTS).document(flight_id).get()
         return snap.to_dict() if snap.exists else None
+
+    # -- results --------------------------------------------------------------
+    def create_result(self, doc: Doc) -> Doc:
+        self._db.collection(self.RESULTS).document(doc["id"]).set(doc)
+        return doc
+
+    def get_result(self, result_id: str) -> Doc | None:
+        snap = self._db.collection(self.RESULTS).document(result_id).get()
+        return snap.to_dict() if snap.exists else None
+
+    def list_results(self, flight_id: str) -> list[Doc]:
+        # One equality filter, so no composite index; sorted here.
+        rows = [s.to_dict() for s in self._where(self.RESULTS, "flightId", flight_id).stream()]
+        return sorted(rows, key=lambda d: d.get("version", 0), reverse=True)
 
     def describe(self) -> str:
         return f"firestore:{self._database}"

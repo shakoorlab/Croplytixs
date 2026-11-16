@@ -1,0 +1,36 @@
+# Croplytix processing job image: canopy area per plot (app/process.py).
+#
+# The API's code and requirements, plus PyTorch and the GIS libraries the
+# pipeline needs. Its own image, so the API's stays small: CPU PyTorch alone is
+# several hundred MB. Built by Cloud Build (cloudbuild.process.yaml), run as the
+# Cloud Run job croplytix-process (docs/gcp-setup.md, step 13).
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    HOME=/tmp
+
+WORKDIR /app
+
+# libexpat for the rasterio wheel, as in the API's Dockerfile.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libexpat1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# CPU-only PyTorch, from PyTorch's own index; its own layer, since it is the
+# biggest and changes least.
+RUN pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1 torchvision==0.29.1
+
+COPY requirements.txt requirements-process.txt ./
+RUN pip install -r requirements.txt -r requirements-process.txt
+
+COPY app ./app
+RUN chmod -R a+rX /app
+
+RUN useradd --system --uid 10001 --no-create-home api
+USER api
+
+# FLIGHT_ID arrives as an environment override on each execution (app/jobs.py).
+CMD ["python", "-m", "app.process"]

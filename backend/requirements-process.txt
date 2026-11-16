@@ -1,0 +1,17 @@
+# The processing job's libraries (app/pipeline, app/process.py), on top of
+# requirements.txt. Only the job's image installs these (Dockerfile.process);
+# the API never imports them. Pinned to what the yam canopy model handoff was
+# tested with (Python 3.11, CPU), which is what scripts/check_pipeline.py
+# reproduces to within 1/255 of probability and 0.0006 m² of canopy per plot.
+#
+# PyTorch itself is installed first, from PyTorch's CPU index, by the
+# Dockerfile: PyPI's Linux wheels carry CUDA, several GB the job can't use.
+#   pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1 torchvision==0.29.1
+segmentation-models-pytorch==0.5.0
+timm==1.0.30
+geopandas==1.2.0
+shapely==2.2.0
+pandas==3.0.6
+scikit-image==0.26.0
+scipy==1.17.1
+Pillow==12.3.0

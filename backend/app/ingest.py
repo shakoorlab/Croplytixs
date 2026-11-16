@@ -243,8 +243,10 @@ def ingest_flight(
     *,
     view_compression: str = "WEBP",
     source_dir: str | None = None,
+    then_process: bool = False,
 ) -> dict[str, Any]:
-    """Builds both COGs for one flight and records the outcome on it.
+    """Builds both COGs for one flight and records the outcome on it, then,
+    with `then_process`, starts processing (app/jobs.py, process_after_ingest).
 
     Never raises for a bad flight: the failure is written to `ingest` instead,
     where the flight page shows it. Returns that record. Each output is
@@ -305,6 +307,15 @@ def ingest_flight(
         record.update(state="failed", finishedAt=utcnow(), error="Ingest crashed; the server logs have the details.")
 
     repo.update_flight(flight_id, {"ingest": record})
+    if then_process and record["state"] == "complete":
+        from .jobs import process_after_ingest
+
+        try:
+            process_after_ingest(flight_id, repo, store)
+        except Exception:
+            # Ingest itself succeeded; the flight shows processing's own failure,
+            # and the Process button starts it again.
+            log.exception("ingest %s: could not start processing", flight_id)
     return record
 
 
@@ -325,7 +336,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     record = ingest_flight(
-        flight_id, get_repo(), get_store(), view_compression=settings.VIEW_COMPRESSION, source_dir=settings.INGEST_SOURCE_DIR
+        flight_id,
+        get_repo(),
+        get_store(),
+        view_compression=settings.VIEW_COMPRESSION,
+        source_dir=settings.INGEST_SOURCE_DIR,
+        then_process=settings.PROCESS_AFTER_INGEST,
     )
     log.info("ingest %s: %s", flight_id, record["state"])
     # Non-zero marks the execution failed in the Cloud Run console.

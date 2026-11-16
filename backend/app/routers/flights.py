@@ -36,11 +36,13 @@ are blocking, and an `async def` around them would stall the event loop.
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..auth import User, current_account, current_user
@@ -48,8 +50,9 @@ from ..db import Repo, trial_key, utcnow
 from ..deps import get_repo, get_store
 from ..ids import flight_id as new_flight_id
 from ..ids import safe_filename
-from ..jobs import queued, start_ingest
-from ..schemas import FileDeclaration, Flight, FlightCreate, FlightUploads, StoredFile, UploadTarget
+from ..jobs import has_plot_grid, queue_processing, queued, start_ingest, start_processing
+from ..model_registry import UnknownModel, resolve
+from ..schemas import FileDeclaration, Flight, FlightCreate, FlightResults, FlightUploads, ProcessRequest, StoredFile, UploadTarget
 from ..settings import settings
 from ..storage import ObjectStore
 
@@ -67,6 +70,7 @@ CONTENT_TYPES = {".tif": "image/tiff", ".tiff": "image/tiff", ".zip": "applicati
 SERVER_FIELDS = {
     "id", "accountId", "trialId", "trialKey", "storagePrefix", "status", "progress", "flagged", "meanCover",
     "error", "model", "createdBy", "createdAt", "uploadedAt", "files", "ingest", "results",
+    "processing", "result", "resultCount",
 }  # fmt: skip
 
 
@@ -76,16 +80,28 @@ STALLED_INGEST = (
 )
 
 
+STALLED_PROCESSING = (
+    "Processing stopped without finishing. On a large field that usually means the job ran out "
+    "of memory: give it more (docs/gcp-setup.md, step 13), then process the flight again."
+)
+
+
+def _overdue(started: str | None, minutes: int) -> bool:
+    return bool(started) and datetime.now(timezone.utc) - datetime.fromisoformat(started) > timedelta(minutes=minutes + 5)
+
+
 def _settled(flight: dict) -> dict:
     """The flight as it really stands. A job killed for running out of memory
-    can't write that it failed, so an ingest still "running" well past the
-    job's timeout is reported as failed — read-only; nothing is written."""
+    can't write that it failed, so an ingest or a processing run still
+    "running" well past its job's timeout is reported as failed — read-only;
+    nothing is written."""
     ingest = flight.get("ingest") or {}
-    started = ingest.get("startedAt")
-    if ingest.get("state") == "running" and started:
-        limit = timedelta(minutes=settings.INGEST_TIMEOUT_MINUTES + 5)
-        if datetime.now(timezone.utc) - datetime.fromisoformat(started) > limit:
-            return {**flight, "ingest": {**ingest, "state": "failed", "error": STALLED_INGEST}}
+    if ingest.get("state") == "running" and _overdue(ingest.get("startedAt"), settings.INGEST_TIMEOUT_MINUTES):
+        flight = {**flight, "ingest": {**ingest, "state": "failed", "error": STALLED_INGEST}}
+    processing = flight.get("processing") or {}
+    if processing.get("state") == "running" and _overdue(processing.get("startedAt"), settings.PROCESS_TIMEOUT_MINUTES):
+        processing = {**processing, "state": "failed", "error": STALLED_PROCESSING, "stage": None}
+        flight = {**flight, "processing": processing, "status": "failed", "error": STALLED_PROCESSING}
     return flight
 
 
@@ -372,3 +388,129 @@ def download_file(
         media_type=match.get("contentType") or "application/octet-stream",
         headers={"Content-Length": str(match["bytes"]), "Content-Disposition": f'inline; filename="{name}"'},
     )
+
+
+# ---------------------------------------------------------------------------
+# processing and results
+# ---------------------------------------------------------------------------
+@router.post("/{flight_id}/process", response_model=Flight, status_code=202)
+def process(
+    trial_id: str,
+    flight_id: str,
+    background: BackgroundTasks,
+    body: ProcessRequest | None = Body(default=None),
+    force: bool = False,
+    account: str = Depends(current_account),
+    repo: Repo = Depends(get_repo),
+    store: ObjectStore = Depends(get_store),
+):
+    """Measures canopy per plot (app/process.py): a new result version, with
+    the default model unless `modelId` names another. Ingest starts this by
+    itself for a flight with a plot grid; this is for a retry, a rerun after the
+    grid or the model changes, or a flight uploaded before processing existed."""
+    flight = _require_flight(account, trial_id, flight_id, repo)
+    if flight["status"] == "awaiting_upload":
+        raise HTTPException(409, "The files haven't finished uploading yet.")
+    if not has_plot_grid(flight):
+        raise HTTPException(422, "This flight has no plot grid. Processing measures canopy per plot, so it needs the shapefile.")
+    ingest_state = (flight.get("ingest") or {}).get("state")
+    if ingest_state != "complete":
+        why = "failed: retry them first" if ingest_state == "failed" else "still being built"
+        raise HTTPException(409, f"The map copies are {why}. Processing reads them.")
+    state = (flight.get("processing") or {}).get("state")
+    if state in ("queued", "running") and not force:
+        raise HTTPException(409, f"Processing is already {state}. Add ?force=true if it is stuck.")
+    try:
+        spec = resolve((body.modelId if body else None) or None)
+    except UnknownModel as exc:
+        raise HTTPException(422, str(exc)) from exc
+    flight.update(queue_processing(flight, repo, spec.id))
+    flight.update(start_processing(flight_id, repo, store, background))
+    return flight
+
+
+def _result(flight: dict, version: int | None, repo: Repo) -> dict:
+    if version is None:
+        current = (flight.get("result") or {}).get("id")
+        doc = repo.get_result(current) if current else None
+    else:
+        doc = repo.get_result(f"{flight['id']}:v{version}")
+    if not doc or doc.get("flightId") != flight["id"]:
+        raise HTTPException(404, "No results for this flight yet." if version is None else f"No result version {version} for this flight.")
+    return doc
+
+
+@router.get("/{flight_id}/results", response_model=FlightResults)
+def get_results(
+    trial_id: str,
+    flight_id: str,
+    version: int | None = None,
+    account: str = Depends(current_account),
+    repo: Repo = Depends(get_repo),
+    store: ObjectStore = Depends(get_store),
+):
+    """A result version (the flight's current one by default) with every
+    plot's numbers, and the list of all versions."""
+    flight = _require_flight(account, trial_id, flight_id, repo)
+    doc = _result(flight, version, repo)
+    plots = json.loads(b"".join(store.open(doc["files"]["plots"])))
+    versions = [
+        {
+            "version": r["version"],
+            "createdAt": r["createdAt"],
+            "modelId": r["model"]["id"],
+            "modelLabel": r["model"]["label"],
+            "plots": r["summary"]["plots"],
+            "meanCover": r["summary"]["meanCover"],
+            "current": r["id"] == (flight.get("result") or {}).get("id"),
+        }
+        for r in repo.list_results(flight_id)
+    ]
+    public = {k: v for k, v in doc.items() if k not in ("files", "accountId", "trialKey")}
+    return {**public, "current": doc["id"] == (flight.get("result") or {}).get("id"), "plots": plots, "versions": versions}
+
+
+def _result_file(store: ObjectStore, key: str, media_type: str, filename: str, disposition: str) -> StreamingResponse:
+    info = store.stat(key)
+    if info is None:
+        raise HTTPException(404, "That file of the result is missing.")
+    return StreamingResponse(
+        store.open(key),
+        media_type=media_type,
+        headers={"Content-Length": str(info.size), "Content-Disposition": f'{disposition}; filename="{filename}"'},
+    )
+
+
+def _export_name(flight: dict, version: int, suffix: str) -> str:
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", f"{flight['trialId']}_{flight.get('flightDate', '')}_canopy_v{version}")
+    return f"{stem}{suffix}"
+
+
+@router.get("/{flight_id}/results/csv")
+def download_results_csv(
+    trial_id: str,
+    flight_id: str,
+    version: int | None = None,
+    account: str = Depends(current_account),
+    repo: Repo = Depends(get_repo),
+    store: ObjectStore = Depends(get_store),
+):
+    """The result as CSV: the research pipeline's columns, then the platform's."""
+    flight = _require_flight(account, trial_id, flight_id, repo)
+    doc = _result(flight, version, repo)
+    return _result_file(store, doc["files"]["csv"], "text/csv; charset=utf-8", _export_name(flight, doc["version"], ".csv"), "attachment")
+
+
+@router.get("/{flight_id}/results/overlay")
+def get_results_overlay(
+    trial_id: str,
+    flight_id: str,
+    version: int | None = None,
+    account: str = Depends(current_account),
+    repo: Repo = Depends(get_repo),
+    store: ObjectStore = Depends(get_store),
+):
+    """The field picture: each plot's canopy in its own colour, boxes in red."""
+    flight = _require_flight(account, trial_id, flight_id, repo)
+    doc = _result(flight, version, repo)
+    return _result_file(store, doc["files"]["overlay"], "image/webp", _export_name(flight, doc["version"], ".webp"), "inline")

@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import TokenVerifier, User, current_user, get_verifier
 from .deps import get_repo, get_store
-from .routers import flights, local_uploads, trials
+from .routers import flights, local_uploads, models, trials
 from .settings import settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -50,6 +50,7 @@ app.add_middleware(
 signed_in = [Depends(current_user)]
 app.include_router(trials.router, prefix="/api", dependencies=signed_in)
 app.include_router(flights.router, prefix="/api", dependencies=signed_in)
+app.include_router(models.router, prefix="/api", dependencies=signed_in)
 
 # Local runs only: where the browser sends file bytes when there is no bucket. On
 # Cloud Run they go to Cloud Storage and this route doesn't exist. No sign-in

@@ -77,6 +77,11 @@ the end of `docs/gcp-setup.md` (Application Default Credentials).
 | DELETE | `/api/trials/{trial_id}/flights/{flight_id}` | abandon a flight whose upload hasn't finished |
 | POST | `/api/trials/{trial_id}/flights/{flight_id}/ingest` | build the flight's COGs again (`?force=true` if stuck) |
 | GET | `/api/trials/{trial_id}/flights/{flight_id}/files/{role}/{name}` | stream a stored file back (up to 32 MiB) |
+| POST | `/api/trials/{trial_id}/flights/{flight_id}/process` | measure canopy per plot as a new result version (`{modelId}` optional; `?force=true` if stuck) |
+| GET | `/api/trials/{trial_id}/flights/{flight_id}/results` | the current result (or `?version=n`): summary, every plot, all versions |
+| GET | `/api/trials/{trial_id}/flights/{flight_id}/results/csv` | the result as CSV (the research pipeline's columns first) |
+| GET | `/api/trials/{trial_id}/flights/{flight_id}/results/overlay` | the result's field picture (WebP) |
+| GET | `/api/models` | the models a flight can be processed with |
 | PUT / DELETE | `/api/local-uploads/{session_id}` | local runs only: stands in for Cloud Storage's upload sessions |
 
 Every route but `/api/health` and the local upload stand-in needs a signed-in user.
@@ -91,8 +96,16 @@ Every route but `/api/health` and the local upload stand-in needs a signed-in us
 - **One account per user.** Nobody sees anyone else's trials yet. Sharing between
   accounts is a later decision; `app.auth.account_id_for` is the one place that
   decides which account a user acts for.
-- **Status stops at `uploaded`.** Ingest (`app/ingest.py`, the Cloud Run job
-  `croplytix-ingest`) turns each ortho into a lossless COG and a viewing COG and
-  records them in the flight's `ingest` field. The clip-and-infer worker that moves
-  `status` to `complete` and fills `meanCover` / `flagged` comes next, and will
-  read the lossless COG.
+- **Processing follows ingest.** Ingest (`app/ingest.py`, the Cloud Run job
+  `croplytix-ingest`) turns each ortho into a lossless COG and a viewing COG. For a
+  flight with a plot grid it then starts processing (`app/process.py`, the job
+  `croplytix-process`, its own image: `Dockerfile.process`), which runs the lab's
+  U-Net over the field and a seeded watershed per plot (`app/pipeline/`), writes a
+  new result version and moves `status` through `queued`, `running` and `complete`.
+  `scripts/check_pipeline.py` checks the pipeline against the model handoff's
+  expected outputs. Its tests (`tests/test_pipeline.py`, `tests/test_process.py`)
+  need the processing libraries and are skipped without them:
+  `pip install --index-url https://download.pytorch.org/whl/cpu torch==2.14.1 torchvision==0.29.1 && pip install -r requirements-process.txt`.
+- **Reviews aren't stored.** Flagged plots are `pending` and the rest `passed`; the
+  Reviewer's accept/reject and mask corrections (the design's correction layer)
+  come next.

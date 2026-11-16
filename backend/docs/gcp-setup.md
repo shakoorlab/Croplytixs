@@ -576,6 +576,127 @@ flight gets the account. Files stay where they are: a flight records its files'
 keys, so old `trials/…` keys keep working beside new `accounts/…` ones. Running it
 again changes nothing.
 
+## 12. The model's weights — into the bucket, once per model version
+
+Processing (step 13) runs the lab's yam canopy U-Net. Its weights are the lab's
+file from the model handoff (`Jakes-Handoff/model/unet_canopy_full.pt`, 98 MB). They
+stay out of the repository, which is public, and live in the bucket instead, at
+the key `app/model_registry.py` names:
+
+```bash
+gcloud storage cp "PATH/TO/Jakes-Handoff/model/unet_canopy_full.pt" \
+  "gs://$BUCKET/models/base/yam-canopy-unet-v1/unet_canopy_full.pt"
+
+# The registry pins the file by its SHA-256; a job refuses any other file.
+shasum -a 256 "PATH/TO/Jakes-Handoff/model/unet_canopy_full.pt"
+# 416dfd6c05ffba5e9383d7810df580a6c39aae014877990b5540d6a7c37a5043
+```
+
+*Why the bucket:* the processing job already reads it (through its mount, as ingest
+does), the API's account already has access, and a new model version is a new
+key next to the old one, so results made with the old one stay traceable. Private
+and Global models (per account, or shared behind a promotion gate) will follow the
+same layout under their own prefixes.
+
+## 13. The processing job — canopy area per plot
+
+Processing turns a flight's COG and plot grid into canopy area per plot
+(`app/process.py`, with `app/pipeline/` doing the image work):
+
+1. **Predict:** the U-Net over the whole field in 128 px tiles, 64 px apart,
+   averaged into a canopy probability raster.
+2. **Watershed:** each plot box is a seed; canopy is flooded from every plot's
+   centre at once, split where plants touch at their narrowest point, and
+   limited to the date's spacing between boxes.
+3. **Write** a new result version: per-plot JSON, the CSV, the field picture, the
+   plot-assignment raster and a run record with every input's hash, under
+   `…/results/v<n>/`. Nothing is overwritten.
+
+It reproduces the lab's research scripts: `scripts/check_pipeline.py` runs it on the
+handoff's test dates and compares with its expected outputs (all 14 dates it can
+read pass, within 1/255 of probability and 0.0006 m² of canopy per plot).
+
+The job has its own image, because CPU PyTorch is several hundred MB the API
+shouldn't carry. From `backend/`:
+
+```bash
+# Build it (5–8 minutes, mostly PyTorch's download)
+gcloud builds submit --config cloudbuild.process.yaml .
+export PROCESS_IMAGE=us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/croplytix-process:latest
+
+gcloud run jobs deploy croplytix-process \
+  --image $PROCESS_IMAGE \
+  --region $REGION \
+  --service-account $SA_EMAIL \
+  --env-vars-file deploy/env.cloudrun.yaml \
+  --add-volume mount-path=/mnt/uploads,type=cloud-storage,bucket=$BUCKET,readonly=true \
+  --memory 8Gi \
+  --cpu 4 \
+  --max-retries 0 \
+  --task-timeout 60m
+
+# The API and the ingest job (both run as $SA_EMAIL) may start this one job.
+gcloud run jobs add-iam-policy-binding croplytix-process \
+  --region $REGION \
+  --member="serviceAccount:$SA_EMAIL" \
+  --role="roles/run.jobsExecutorWithOverrides"
+```
+
+Then give the API and the ingest job the new environment (the env file now says
+`PROCESS_RUNNER: "cloudrun"`), so a finished ingest starts processing:
+
+```bash
+gcloud run deploy croplytix-api --source . --region $REGION --env-vars-file deploy/env.cloudrun.yaml
+gcloud run jobs update croplytix-ingest --region $REGION \
+  --image $(gcloud run services describe croplytix-api --region $REGION \
+    --format='value(spec.template.spec.containers[0].image)') \
+  --env-vars-file deploy/env.cloudrun.yaml
+```
+
+*Why each piece:*
+
+- `--service-account $SA_EMAIL` — the API's identity: it reads the COG, the grid and
+  the weights, and writes results to the bucket and Firestore. Nothing else.
+- `--add-volume … readonly=true` — the bucket as a folder, so the COG and the weights
+  are read in place instead of copied into the job's RAM disk. Results are written
+  through the storage API, which is why the mount can stay read-only.
+- `--memory 8Gi --cpu 4` — the model is CPU-bound and uses every core (about 25 s for
+  Roujol A on 2 vCPUs, so roughly half that on 4). The watershed holds the whole
+  field, about 40 bytes a pixel: `PROCESS_MAX_MEGAPIXELS` (150 million pixels at
+  2.3 cm, about 8 ha) keeps a run inside 8 GiB, and a bigger field is refused with
+  a message rather than killed. Orthophotos much finer than 2.3 cm are averaged
+  down to about the model's pixel size first, which is what the model was trained on.
+- `--max-retries 0`, `--task-timeout 60m` — a failure is written on the flight with
+  its reason; **Try again** on the flight page starts a fresh run. A run still
+  "running" 65 minutes after it started is reported as failed (out of memory, most
+  likely).
+
+**Every API deploy changes the image; the process job has its own,** so it only needs
+rebuilding when `app/` changes in a way processing uses, or its requirements do:
+
+```bash
+gcloud builds submit --config cloudbuild.process.yaml .
+gcloud run jobs update croplytix-process --region $REGION --image $PROCESS_IMAGE
+```
+
+Check it on a flight (the id is on the flight page's URL):
+
+```bash
+gcloud run jobs execute croplytix-process --region $REGION --update-env-vars FLIGHT_ID=flt_... --wait
+gcloud logging read 'resource.type="cloud_run_job" AND resource.labels.job_name="croplytix-process"' \
+  --limit 30 --format='value(textPayload)'
+```
+
+Flights uploaded before this step have no result: open one and press **Process
+flight**. A flight with no plot grid can't be processed; the page says so.
+
+*What it costs:* about a minute of 4 vCPU and 8 GiB for a field like Roujol A:
+240 vCPU-seconds and 480 GiB-seconds, against a monthly free tier of 240,000 and
+450,000, so hundreds of flights a month before it costs anything. The image is
+several hundred MB in Artifact Registry, past the free 0.5 GB on its own (about
+$0.10 per GB-month beyond it), so keep the cleanup policy from the frontend
+checklist. Each result adds a few MB to the bucket.
+
 ## Optional, but the best lesson in here: run the API on your laptop against the real cloud
 
 ```bash
