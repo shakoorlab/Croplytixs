@@ -41,7 +41,8 @@ const NOT_CHOSEN = 'Not chosen yet · picked when the flight is run';
 
 // What the (i) beside each label says — one plain sentence per term.
 const HELP = {
-  processing: 'Processing cuts out every plot, finds its canopy and measures it. This shows how far along that is.',
+  processing:
+    'Processing finds canopy across the whole field, then gives each patch to the plot it grows from, and measures every plot. This shows how far along that is.',
   mapCopies:
     'Two copies of the orthophoto made after upload: a full-quality one for measuring plots, and a much smaller one for viewing the field on a map.',
   flown: 'The day the drone flew. Results are lined up by this date in the growth curves.',
@@ -52,9 +53,11 @@ const HELP = {
   pattern: 'How plot details are read from each image’s file name; the parts in braces are the pieces it picks out.',
   plotIds: 'Which columns in the shapefile’s table name each plot, its genotype and its rep.',
   position: 'How far the plot outlines were nudged on the upload page so they sit on the plots in the image.',
-  edgeTrim: 'Each plot outline is shrunk by this much before measuring, so paths and neighbouring plots don’t count toward its canopy.',
-  model: 'The AI model that finds canopy in each plot image.',
-  plotArea: 'What canopy cover is a percentage of.'
+  edgeTrim:
+    'The trim set on the upload page. The watershed doesn’t use it: each plot outline is where its canopy is counted from, not a fence.',
+  model: 'The AI model that finds canopy in the orthophoto.',
+  plotArea:
+    'How canopy is given to plots. Each plot’s canopy is flooded out from its centre through connected canopy, so plants growing past the outline still count, up to the spacing between plots.'
 };
 
 /**
@@ -278,19 +281,9 @@ export default function FlightSummary({ trialId, flight, onChanged, onUploadCanc
                 </Typography>
               )}
             </Row>
-            <Row label="Plot area" help={HELP.plotArea}>
-              {flight.denominator === 'polygon' && (
-                <>
-                  <Typography variant="body2">The plot outline</Typography>
-                  <Detail>Corners outside the image aren’t counted</Detail>
-                </>
-              )}
-              {flight.denominator === 'clip' && <Typography variant="body2">The whole plot image</Typography>}
-              {!flight.denominator && (
-                <Typography variant="body2" color="text.secondary">
-                  {NOT_CHOSEN}
-                </Typography>
-              )}
+            <Row label="Canopy per plot" help={HELP.plotArea}>
+              <Typography variant="body2">Watershed from each plot’s centre</Typography>
+              <Detail>Canopy past the outline counts, up to the date’s spacing between plots. Cover is canopy inside the outline.</Detail>
             </Row>
           </SectionBox>
         </Grid>
@@ -421,6 +414,7 @@ export default function FlightSummary({ trialId, flight, onChanged, onUploadCanc
               {flight.insetCm != null && (
                 <Row label="Edge trim" help={HELP.edgeTrim}>
                   <Typography variant="body2">{flight.insetCm ? `${flight.insetCm} cm from each plot edge` : 'None'}</Typography>
+                  {flight.insetCm ? <Detail>Not used by the watershed</Detail> : null}
                 </Row>
               )}
             </SectionBox>

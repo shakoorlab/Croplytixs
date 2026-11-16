@@ -103,5 +103,19 @@ export async function apiDownload(path, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
+/**
+ * A stored file as a Blob, fetched with the token — for an image an <img> can't
+ * request itself (it can't send the Authorization header). Pair it with
+ * URL.createObjectURL, and revoke the URL when the image goes.
+ */
+export async function apiBlob(path) {
+  const response = await fetchWithToken(path, (auth) => ({ headers: auth }));
+  if (!response.ok) {
+    const body = parseBody(await response.text());
+    throw new ApiError(response.status, detailOf(body) || `HTTP ${response.status}`, body);
+  }
+  return response.blob();
+}
+
 /** For `useSWR(key, fetcher)` — the key is the path. */
 export const fetcher = (path) => apiFetch(path);

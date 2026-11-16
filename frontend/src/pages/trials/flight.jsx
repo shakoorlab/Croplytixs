@@ -27,8 +27,9 @@ import TrialTabs from 'sections/trials/TrialTabs';
 import QcChip from 'sections/trials/QcChip';
 import FlightSummary from 'sections/trials/FlightSummary';
 import FlightProgress from 'sections/trials/FlightProgress';
+import FlightProcessing, { FieldOverlay } from 'sections/trials/FlightProcessing';
 import { NESTED_PANEL_FRAMED } from 'sections/trials/surfaces';
-import { useFlight, useTrial } from 'api/trials';
+import { useFlight, useFlightResults, useTrial } from 'api/trials';
 import { sourceLabel } from 'sections/trials/RunsTable';
 import formatRelative from 'utils/formatRelative';
 
@@ -64,11 +65,21 @@ export default function FlightDetail() {
 
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [version, setVersion] = useState(null); // null: the flight's current result
 
-  // The flights API carries no per-plot results yet; `results` arrives with
-  // `GET …/flights/{fid}/results`. Until then the panel shows the status instead.
-  const plots = flight?.results?.plots || NONE;
-  const summary = flight?.results?.summary;
+  // The flight record carries a summary of its current result; the plots come
+  // from `GET …/flights/{fid}/results`. Without a result, the panel shows how
+  // far the flight is from having one.
+  // A version's plots never change, so each is fetched once and cached; the list
+  // of versions (and which is current) comes from the current version's answer,
+  // which is fetched afresh whenever the flight gets a new one.
+  const currentQuery = useFlightResults(trialId, flight);
+  const pickedQuery = useFlightResults(trialId, flight, version);
+  const results = version ? pickedQuery.data : currentQuery.data;
+  const resultsError = version ? pickedQuery.error : currentQuery.error;
+  const versions = currentQuery.data?.versions;
+  const plots = results?.plots || NONE;
+  const summary = results?.summary;
 
   const rows = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -126,9 +137,6 @@ export default function FlightDetail() {
     );
   }
 
-  const openReviewer = (plotId) =>
-    navigate(`/trials/${trialId}/review/session?flight=${flightId}&queue=all${plotId ? `&plot=${plotId}` : ''}`);
-
   return (
     <Grid container rowSpacing={2.5} columnSpacing={2.75}>
       <Grid size={12}>
@@ -181,133 +189,156 @@ export default function FlightDetail() {
 
               {/* ---- results, or how far the flight is from having them ---- */}
               <Grid size={12}>
-                {!summary ? (
-                  <FlightProgress flight={flight} />
-                ) : (
-                  <Stack sx={{ gap: 2 }}>
-                    <Stack direction="row" sx={{ gap: 1.5, flexWrap: 'wrap' }}>
-                      <StatTile label="Plots" value={summary.plots} hint={`${flight.plots} in shapefile`} />
-                      <StatTile label="Mean cover" value={`${summary.meanCover.toFixed(1)}%`} hint="QC-accepted" />
-                      <StatTile
-                        label="Needs review"
-                        value={summary.pending}
-                        hint={`${summary.flaggedTotal} flagged in total`}
-                        color={summary.pending ? 'warning.main' : 'success.main'}
-                      />
-                      <StatTile label="Corrected" value={summary.edited} hint={`${summary.rejected} rejected`} />
-                    </Stack>
+                <Stack sx={{ gap: 2 }}>
+                  <FlightProcessing
+                    trialId={trialId}
+                    flight={flight}
+                    results={results}
+                    versions={versions}
+                    version={version}
+                    onVersionChange={setVersion}
+                    onChanged={mutate}
+                  />
+                  {resultsError && (
+                    <Alert severity="error" variant="outlined">
+                      Could not load the results — {resultsError.message}
+                    </Alert>
+                  )}
+                  {!summary ? (
+                    <FlightProgress flight={flight} />
+                  ) : (
+                    <Stack sx={{ gap: 2 }}>
+                      <Stack direction="row" sx={{ gap: 1.5, flexWrap: 'wrap' }}>
+                        <StatTile label="Plots" value={summary.plots} hint={flight.plots ? `${flight.plots} in the grid` : 'measured'} />
+                        <StatTile label="Mean cover" value={`${summary.meanCover.toFixed(1)}%`} hint="canopy inside each box" />
+                        <StatTile
+                          label="Canopy measured"
+                          value={`${summary.canopyCountedM2.toFixed(1)} m²`}
+                          hint="assigned to plots, past the boxes too"
+                        />
+                        <StatTile
+                          label="Needs review"
+                          value={summary.pending}
+                          hint={`${summary.flaggedTotal} flagged in total`}
+                          color={summary.pending ? 'warning.main' : 'success.main'}
+                        />
+                      </Stack>
 
-                    <Stack direction="row" sx={{ gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <ToggleButtonGroup
-                        exclusive
-                        size="small"
-                        value={filter}
-                        onChange={(event, value) => value && setFilter(value)}
-                        sx={{
-                          '& .MuiToggleButton-root.Mui-selected': {
-                            color: 'primary.main',
-                            bgcolor: 'primary.lighter',
-                            borderColor: 'primary.light'
-                          }
-                        }}
-                      >
-                        {FILTERS.map((option) => (
-                          <ToggleButton key={option.key} value={option.key}>
-                            {option.label}
-                          </ToggleButton>
-                        ))}
-                      </ToggleButtonGroup>
-                      <Box sx={{ flex: 1 }} />
-                      <OutlinedInput
-                        size="small"
-                        placeholder="Plot, genotype, r5c8"
-                        value={search}
-                        onChange={(event) => setSearch(event.target.value)}
-                        startAdornment={
-                          <InputAdornment position="start">
-                            <SearchOutlined />
-                          </InputAdornment>
-                        }
-                        sx={{ width: 220 }}
-                      />
-                    </Stack>
+                      <FieldOverlay trialId={trialId} flightId={flight.id} version={results.version} />
 
-                    <TableContainer
-                      sx={(theme) => ({
-                        ...NESTED_PANEL_FRAMED(theme),
-                        maxHeight: 560,
-                        '& tbody tr:last-of-type td': { borderBottom: 0 }
-                      })}
-                    >
-                      <Table size="small" stickyHeader>
-                        <TableHead>
-                          <TableRow>
-                            <TableCell>Plot</TableCell>
-                            <TableCell>Genotype</TableCell>
-                            <TableCell align="right">Rep</TableCell>
-                            <TableCell align="right">Cover</TableCell>
-                            <TableCell align="right">Canopy</TableCell>
-                            <TableCell align="right">Confidence</TableCell>
-                            <TableCell>QC</TableCell>
-                            <TableCell>Flag</TableCell>
-                          </TableRow>
-                        </TableHead>
-                        <TableBody>
-                          {rows.map((plot) => (
-                            <TableRow key={plot.plotId} hover onClick={() => openReviewer(plot.plotId)} sx={{ cursor: 'pointer' }}>
-                              <TableCell sx={{ ...cell, fontWeight: 600 }}>
-                                {plot.plotId}
-                                <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-                                  r{plot.row} c{plot.col}
-                                </Typography>
-                              </TableCell>
-                              <TableCell sx={mono}>G{plot.genotype}</TableCell>
-                              <TableCell sx={mono} align="right">
-                                {plot.rep}
-                              </TableCell>
-                              <TableCell sx={cell} align="right">
-                                {plot.cover.toFixed(1)}%
-                                {plot.decision?.edited && (
-                                  <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.75 }}>
-                                    was {plot.modelCover.toFixed(1)}
-                                  </Typography>
-                                )}
-                              </TableCell>
-                              <TableCell sx={cell} align="right">
-                                {Math.round(plot.areaCm2).toLocaleString('en-US')} cm²
-                              </TableCell>
-                              <TableCell sx={mono} align="right">
-                                <Box component="span" sx={{ color: plot.confidence < 0.6 ? 'warning.main' : 'text.primary' }}>
-                                  {plot.confidence.toFixed(2)}
-                                </Box>
-                              </TableCell>
-                              <TableCell>
-                                <QcChip qc={plot.qc} edited={plot.decision?.edited} audit={plot.audit} />
-                              </TableCell>
-                              <TableCell>
-                                <Typography variant="caption" color={plot.flag ? 'warning.main' : 'text.disabled'}>
-                                  {plot.flagLabel || '—'}
-                                </Typography>
-                              </TableCell>
-                            </TableRow>
+                      <Stack direction="row" sx={{ gap: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <ToggleButtonGroup
+                          exclusive
+                          size="small"
+                          value={filter}
+                          onChange={(event, value) => value && setFilter(value)}
+                          sx={{
+                            '& .MuiToggleButton-root.Mui-selected': {
+                              color: 'primary.main',
+                              bgcolor: 'primary.lighter',
+                              borderColor: 'primary.light'
+                            }
+                          }}
+                        >
+                          {FILTERS.map((option) => (
+                            <ToggleButton key={option.key} value={option.key}>
+                              {option.label}
+                            </ToggleButton>
                           ))}
-                          {rows.length === 0 && (
+                        </ToggleButtonGroup>
+                        <Box sx={{ flex: 1 }} />
+                        <OutlinedInput
+                          size="small"
+                          placeholder="Plot, genotype, r5c8"
+                          value={search}
+                          onChange={(event) => setSearch(event.target.value)}
+                          startAdornment={
+                            <InputAdornment position="start">
+                              <SearchOutlined />
+                            </InputAdornment>
+                          }
+                          sx={{ width: 220 }}
+                        />
+                      </Stack>
+
+                      <TableContainer
+                        sx={(theme) => ({
+                          ...NESTED_PANEL_FRAMED(theme),
+                          maxHeight: 560,
+                          '& tbody tr:last-of-type td': { borderBottom: 0 }
+                        })}
+                      >
+                        <Table size="small" stickyHeader>
+                          <TableHead>
                             <TableRow>
-                              <TableCell colSpan={8}>
-                                <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 3 }}>
-                                  No plots match.
-                                </Typography>
-                              </TableCell>
+                              <TableCell>Plot</TableCell>
+                              <TableCell>Genotype</TableCell>
+                              <TableCell align="right">Rep</TableCell>
+                              <TableCell align="right">Cover in box</TableCell>
+                              <TableCell align="right">Canopy</TableCell>
+                              <TableCell align="right">Past the box</TableCell>
+                              <TableCell align="right">Confidence</TableCell>
+                              <TableCell>QC</TableCell>
+                              <TableCell>Flag</TableCell>
                             </TableRow>
-                          )}
-                        </TableBody>
-                      </Table>
-                    </TableContainer>
-                    <Typography variant="caption" color="text.secondary" align="right">
-                      {rows.length} of {plots.length} plots · click a row to open it in the Reviewer
-                    </Typography>
-                  </Stack>
-                )}
+                          </TableHead>
+                          <TableBody>
+                            {rows.map((plot) => (
+                              <TableRow key={plot.plotId} hover>
+                                <TableCell sx={{ ...cell, fontWeight: 600 }}>
+                                  {plot.plotId}
+                                  {plot.row != null && (
+                                    <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                                      r{plot.row} c{plot.col}
+                                    </Typography>
+                                  )}
+                                </TableCell>
+                                <TableCell sx={mono}>{plot.genotype ?? '—'}</TableCell>
+                                <TableCell sx={mono} align="right">
+                                  {plot.rep ?? '—'}
+                                </TableCell>
+                                <TableCell sx={cell} align="right">
+                                  {plot.cover.toFixed(1)}%
+                                </TableCell>
+                                <TableCell sx={cell} align="right" title={`${Math.round(plot.areaCm2).toLocaleString('en-US')} cm²`}>
+                                  {plot.areaM2.toFixed(3)} m²
+                                </TableCell>
+                                <TableCell sx={cell} align="right">
+                                  {plot.gainM2 > 0.0005 ? `+${plot.gainM2.toFixed(3)} m²` : '—'}
+                                </TableCell>
+                                <TableCell sx={mono} align="right">
+                                  <Box component="span" sx={{ color: plot.confidence < 0.6 ? 'warning.main' : 'text.primary' }}>
+                                    {plot.confidence.toFixed(2)}
+                                  </Box>
+                                </TableCell>
+                                <TableCell>
+                                  <QcChip qc={plot.qc} edited={plot.decision?.edited} audit={plot.audit} />
+                                </TableCell>
+                                <TableCell>
+                                  <Typography variant="caption" color={plot.flag ? 'warning.main' : 'text.disabled'}>
+                                    {plot.flagLabel || '—'}
+                                  </Typography>
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                            {rows.length === 0 && (
+                              <TableRow>
+                                <TableCell colSpan={9}>
+                                  <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 3 }}>
+                                    No plots match.
+                                  </Typography>
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                      <Typography variant="caption" color="text.secondary" align="right">
+                        {rows.length} of {plots.length} plots · canopy is the watershed’s area, including what grew past the box
+                      </Typography>
+                    </Stack>
+                  )}
+                </Stack>
               </Grid>
             </Grid>
           )}

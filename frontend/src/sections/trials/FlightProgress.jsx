@@ -24,10 +24,10 @@ const MAP_COPIES = {
 };
 
 const PROCESSING = {
-  uploaded: { state: 'waiting', detail: 'Waiting for the processing worker' },
+  uploaded: { state: 'waiting', detail: 'Starts after the map copies' },
   queued: { state: 'waiting', detail: 'Queued' },
   complete: { state: 'done', detail: 'Complete' },
-  failed: { state: 'error', detail: 'Failed' }
+  failed: { state: 'error', detail: 'Failed · try again above' }
 };
 
 /**
@@ -44,18 +44,21 @@ export function flightStages(flight, upload) {
   if (flight.source === 'ortho') {
     stages.push({ key: 'copies', label: 'Map copies', ...(MAP_COPIES[flight.ingest?.state] || { state: 'waiting', detail: 'Not built' }) });
   }
+  const hasGrid = (flight.files || []).some((file) => file.role === 'shapefile');
   stages.push({
     key: 'processing',
     label: 'Processing',
     ...(flight.status === 'running'
-      ? { state: 'active', detail: `${flight.progress || 0}% done` }
-      : PROCESSING[flight.status] || { state: 'waiting', detail: flight.status })
+      ? { state: 'active', detail: `${flight.progress || 0}% · ${flight.processing?.stage || 'working'}` }
+      : flight.status === 'uploaded' && !hasGrid
+        ? { state: 'waiting', detail: 'Needs a plot grid' }
+        : PROCESSING[flight.status] || { state: 'waiting', detail: flight.status })
   });
   stages.push({
     key: 'results',
     label: 'Results',
     state: flight.status === 'complete' ? 'done' : 'waiting',
-    detail: flight.status === 'complete' ? 'Ready to review' : 'After processing'
+    detail: flight.status === 'complete' ? 'Ready' : 'After processing'
   });
   return stages;
 }
@@ -80,13 +83,12 @@ export default function FlightProgress({ flight }) {
   const failed = stages.some((stage) => stage.state === 'error');
 
   let explanation =
-    'Per-plot masks, fractional cover and canopy area appear here when processing finishes. There’s nothing to do until then.';
+    'Canopy area, cover and QC flags for every plot appear here when processing finishes. There’s nothing to do until then.';
   if (flight.status === 'awaiting_upload')
     explanation = 'The files are still on their way to storage. The map copies are built as soon as all of them have arrived.';
   else if (flight.status === 'failed') explanation = flight.error || 'Processing failed. No error detail was recorded.';
   else if (flight.ingest?.state === 'failed') explanation = 'The map copies couldn’t be built. Use Retry in the Progress box above.';
-  else if (flight.status === 'complete')
-    explanation = 'Processing is complete. Per-plot results will be listed here once the API serves them.';
+  else if (flight.status === 'complete') explanation = 'Processing is complete. Loading the results…';
 
   return (
     <Box sx={(theme) => ({ ...NESTED_PANEL_FRAMED(theme), px: { xs: 2, md: 3 }, py: { xs: 2.5, md: 3 } })}>

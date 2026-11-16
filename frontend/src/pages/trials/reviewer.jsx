@@ -118,7 +118,7 @@ export default function Reviewer() {
   const flightId = params.get('flight') || anchorId;
   const mode = params.get('queue') || 'queue';
   const flight = flights.find((candidate) => candidate.id === flightId && candidate.status === 'complete') || null;
-  const plots = flight?.results.plots || NONE;
+  const plots = flight?.results?.plots || NONE;
   const plotsById = useMemo(() => Object.fromEntries(plots.map((plot) => [plot.plotId, plot])), [plots]);
 
   // ---- queue: frozen on entry so accepting a plot does not pull the rug ----
@@ -292,7 +292,8 @@ export default function Reviewer() {
     const complete = flights.filter((candidate) => candidate.status === 'complete' && candidate.flightDate < flight.flightDate);
     return complete[0] || null;
   }, [flights, flight]);
-  const previousPlot = previousFlight && current ? previousFlight.results.plots.find((plot) => plot.plotId === current.plotId) : null;
+  const previousPlot =
+    previousFlight?.results && current ? previousFlight.results.plots.find((plot) => plot.plotId === current.plotId) : null;
 
   // ---------------------------------------------------------------------------
 

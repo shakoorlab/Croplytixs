@@ -81,8 +81,8 @@ export default function TrialReview() {
   const flight = complete.find((candidate) => candidate.id === flightId) || null;
   const processing = flights.find((candidate) => candidate.status === 'running');
 
-  const plots = flight?.results.plots || NONE;
-  const summary = flight?.results.summary;
+  const plots = flight?.results?.plots || NONE;
+  const summary = flight?.results?.summary;
 
   const reasons = useMemo(() => {
     const counts = {};
