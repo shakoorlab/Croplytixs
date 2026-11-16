@@ -27,8 +27,12 @@ class TrialCreate(BaseModel):
 
 
 class Trial(BaseModel):
-    """What the lobby table renders. The last five fields are *derived* from the
-    trial's flights on every read, never stored — so they cannot drift."""
+    """What the lobby table renders. The last six fields are *derived* from the
+    trial's flights on every read, never stored — so they cannot drift.
+
+    `plots` is the roster's count (0 when the trial was created without one);
+    `gridPlots` is the plot count of the newest flight's grid, which stands in
+    for it until a roster is set."""
 
     id: str
     name: str
@@ -38,6 +42,7 @@ class Trial(BaseModel):
     plots: int
     rosterFile: str | None = None
     createdAt: str
+    gridPlots: int = 0
     flightDates: int = 0
     processed: int = 0
     expected: int = 0

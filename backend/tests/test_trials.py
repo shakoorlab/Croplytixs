@@ -36,3 +36,16 @@ def test_list_and_get(client, trial):
     assert [t["id"] for t in client.get("/api/trials").json()] == [trial["id"]]
     assert client.get(f"/api/trials/{trial['id']}").json()["name"] == "Guadeloupe Yam"
     assert client.get("/api/trials/nope").status_code == 404
+
+
+def test_a_trial_without_a_roster_takes_its_size_from_the_newest_grid(client):
+    from tests.conftest import upload_flight
+
+    trial = client.post("/api/trials", json={"name": "No roster", "crop": "Yam", "site": "x", "season": "2026"}).json()
+    assert trial["plots"] == 0 and trial["gridPlots"] == 0
+    upload_flight(client, trial, meta={"flightDate": "2026-08-20", "capture": "12-ms", "plots": 144})
+    upload_flight(client, trial, meta={"flightDate": "2026-09-10", "capture": "12-ms", "plots": 142})
+    upload_flight(client, trial, meta={"flightDate": "2026-09-24", "capture": "12-ms", "plots": 0}, shapefile={})
+    listed = client.get("/api/trials").json()[0]
+    assert listed["plots"] == 0 and listed["gridPlots"] == 142
+    assert client.get(f"/api/trials/{trial['id']}").json()["gridPlots"] == 142

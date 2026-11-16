@@ -25,11 +25,25 @@ from ..schemas import Trial, TrialCreate
 router = APIRouter(prefix="/trials", tags=["trials"])
 
 
+def _grid_plots(flights: list[dict]) -> int:
+    """Plots in the newest flight's plot grid (by flight date), 0 with no grid.
+
+    A trial created without a roster still has a size once a flight brings
+    its grid; each date can have its own grid, so the newest one stands.
+    """
+    gridded = [f for f in flights if (f.get("plots") or 0) > 0]
+    if not gridded:
+        return 0
+    newest = max(gridded, key=lambda f: (f.get("flightDate") or "", f.get("createdAt") or ""))
+    return newest["plots"]
+
+
 def _with_stats(trial: dict, flights: list[dict]) -> Trial:
     complete = [f for f in flights if f.get("status") == "complete"]
     last = max([trial["createdAt"], *[f["createdAt"] for f in flights]])
     return Trial(
         **trial,
+        gridPlots=_grid_plots(flights),
         flightDates=len(flights),
         processed=sum(f.get("plots", 0) for f in complete),
         expected=sum(f.get("plots", 0) for f in flights),
