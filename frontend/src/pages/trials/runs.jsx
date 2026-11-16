@@ -13,7 +13,7 @@ import LinearProgress from '@mui/material/LinearProgress';
 import PageHeader from 'components/PageHeader';
 import TrialTabs from 'sections/trials/TrialTabs';
 import RunsTable from 'sections/trials/RunsTable';
-import { useFlights, useTrial } from 'api/trials';
+import { trialSubtitle, useFlights, useTrial } from 'api/trials';
 
 // assets
 import PlusOutlined from '@ant-design/icons/PlusOutlined';
@@ -84,7 +84,7 @@ export default function TrialRuns() {
         <PageHeader
           crumbs={[...crumbs, { label: trial.name }]}
           title={trial.name}
-          subtitle={`${trial.crop} · ${trial.site} · ${trial.plots} plots`}
+          subtitle={trialSubtitle(trial)}
           actions={
             <Button variant="contained" startIcon={<PlusOutlined />} onClick={goToUpload}>
               Upload imagery

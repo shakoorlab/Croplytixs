@@ -41,6 +41,7 @@ const QUEUE_LABELS = { queue: 'flagged + audit', flagged: 'flagged', audit: 'aud
 
 const fmtArea = (cm2) => `${Math.round(cm2).toLocaleString('en-US').replace(/,/g, ' ')} cm²`;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+const plotArea = (plot) => plot.boxAreaM2 * 10000; // cm², the plot's box
 
 function queueFor(plots, mode) {
   switch (mode) {
@@ -112,12 +113,16 @@ export default function Reviewer() {
   const navigate = useNavigate();
 
   const { trial, flights, anchorId, isLoading, error } = useTrialResults(trialId);
-  // Per-plot imagery comes with results from the API; until then there are no plots to draw.
+  // Per-plot imagery isn't served yet, so there is no plot to draw or mask to
+  // edit: the Reviewer shows each plot's numbers from the result, and accepting,
+  // rejecting and correcting wait for the imagery (and a place to store them).
   const bundle = null;
 
   const flightId = params.get('flight') || anchorId;
   const mode = params.get('queue') || 'queue';
-  const flight = flights.find((candidate) => candidate.id === flightId && candidate.status === 'complete') || null;
+  // Only once its plots have arrived: the queue below is frozen the first time
+  // there is a flight, so freezing it before the plots load would leave it empty.
+  const flight = flights.find((candidate) => candidate.id === flightId && candidate.status === 'complete' && candidate.results) || null;
   const plots = flight?.results?.plots || NONE;
   const plotsById = useMemo(() => Object.fromEntries(plots.map((plot) => [plot.plotId, plot])), [plots]);
 
@@ -163,15 +168,17 @@ export default function Reviewer() {
 
   // ---- readouts ----
   const readout = useMemo(() => {
-    if (!current || !edit || !layers) return null;
+    if (!current) return null;
+    // Without imagery: the model's numbers, as the result has them.
+    if (!edit || !layers) return { liveCover: current.cover, changed: 0, edited: false, areaCm2: current.areaCm2 };
     // `tick` is bumped after every stroke and undo: the mask is mutated in
     // place, so it is the only signal that the numbers below are stale
     if (tick < 0) return null;
     const maskCover = coverOf(edit.mask, layers.valid);
     const originalCover = coverOf(edit.original, layers.valid);
     const changed = maskDiff(edit.mask, edit.original);
-    const liveCover = clamp(current.modelCover + (maskCover - originalCover), 0, 100);
-    return { liveCover, changed, edited: changed > 0, areaCm2: (liveCover / 100) * current.plotAreaCm2 };
+    const liveCover = clamp(current.cover + (maskCover - originalCover), 0, 100);
+    return { liveCover, changed, edited: changed > 0, areaCm2: (liveCover / 100) * plotArea(current) };
   }, [current, edit, layers, tick]);
 
   const exit = useCallback(() => navigate(`/trials/${trialId}/review?flight=${flightId || ''}`), [navigate, trialId, flightId]);
@@ -183,32 +190,32 @@ export default function Reviewer() {
   }, [queue, index]);
 
   const accept = useCallback(() => {
-    if (!current || !readout) return;
+    if (!bundle || !current || !readout) return;
     recordDecision(trialId, flight.id, current.plotId, {
       decision: 'accepted',
       edited: readout.edited,
       pixelsChanged: readout.changed,
-      coverBefore: current.modelCover,
+      coverBefore: current.cover,
       coverAfter: readout.liveCover,
       useForTraining,
       grade: readout.edited ? grade : 'rough'
     });
     advance();
-  }, [current, readout, trialId, flight, useForTraining, grade, advance]);
+  }, [bundle, current, readout, trialId, flight, useForTraining, grade, advance]);
 
   const reject = useCallback(() => {
-    if (!current) return;
+    if (!bundle || !current) return;
     recordDecision(trialId, flight.id, current.plotId, {
       decision: 'rejected',
       edited: false,
       pixelsChanged: 0,
-      coverBefore: current.modelCover,
+      coverBefore: current.cover,
       coverAfter: null,
       useForTraining: false,
       grade: null
     });
     advance();
-  }, [current, trialId, flight, advance]);
+  }, [bundle, current, trialId, flight, advance]);
 
   const undo = useCallback(() => {
     if (!edit || !edit.undo.length) return;
@@ -443,6 +450,16 @@ export default function Reviewer() {
                 </Button>
               </Stack>
             </Stack>
+          ) : !bundle ? (
+            <Stack sx={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2, textAlign: 'center', maxWidth: 520 }}>
+              <Alert severity="info" variant="outlined" sx={{ textAlign: 'left' }}>
+                Plot images aren’t served yet, so this plot can’t be shown or its mask corrected here. Its numbers are on the right. To see
+                every plot’s canopy, open the field picture on the flight’s page.
+              </Alert>
+              <Button variant="outlined" color="secondary" onClick={() => navigate(`/trials/${trialId}/flights/${flight.id}`)}>
+                Open the flight’s field picture
+              </Button>
+            </Stack>
           ) : (
             <>
               <Stack direction="row" sx={{ gap: 1.5, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
@@ -538,7 +555,7 @@ export default function Reviewer() {
               )}
 
               <Typography variant="caption" color="text.secondary" align="center">
-                1 px = {current?.demo.gsdCm} cm of ground · the brush edits the mask in the GeoTIFF&apos;s own raster grid, so nothing
+                1 px = {current?.demo?.gsdCm} cm of ground · the brush edits the mask in the GeoTIFF&apos;s own raster grid, so nothing
                 round-trips through PNG
               </Typography>
             </>
@@ -566,7 +583,7 @@ export default function Reviewer() {
                 <QcChip qc={current.qc} edited={current.decision?.edited} audit={current.audit} />
               </Stack>
               <Typography variant="caption" color="text.secondary">
-                G{current.genotype} · rep {current.rep} · r{current.row} c{current.col} · {flight.flightDate} · {flight.model}
+                G{current.genotype ?? '—'} · rep {current.rep ?? '—'} · r{current.row} c{current.col} · {flight.flightDate} · {flight.model}
               </Typography>
               <Typography variant="caption" sx={{ color: current.flag ? 'warning.main' : 'text.secondary' }}>
                 {current.flag ? FLAG_LABELS[current.flag] : current.audit ? 'Audit sample — the model was confident here' : 'Auto-passed'} ·
@@ -575,92 +592,104 @@ export default function Reviewer() {
             </Stack>
 
             <Readout
-              label="Fractional cover"
+              label="Cover in box"
               big
               value={`${readout.liveCover.toFixed(1)} %`}
               hint={
                 readout.edited
-                  ? `Was ${current.modelCover.toFixed(1)}% before your edit · ${readout.changed} px changed`
+                  ? `Was ${current.cover.toFixed(1)}% before your edit · ${readout.changed} px changed`
                   : 'Model output, unedited'
               }
             />
             <Stack direction="row" sx={{ gap: 3 }}>
-              <Readout label="Canopy area" value={fmtArea(readout.areaCm2)} />
-              <Readout label="Plot area" value={`${(current.plotAreaCm2 / 10000).toFixed(2)} m²`} hint="Polygon, nodata excluded" />
+              <Readout label="Canopy area" value={fmtArea(readout.areaCm2)} hint={bundle ? undefined : 'Including canopy past the box'} />
+              <Readout label="Plot box" value={`${current.boxAreaM2.toFixed(2)} m²`} />
             </Stack>
 
             <Divider />
 
-            <FormControlLabel
-              control={<Checkbox checked={useForTraining} onChange={(event) => setUseForTraining(event.target.checked)} />}
-              label={
-                <Stack direction="row" sx={{ gap: 1, alignItems: 'center' }}>
-                  <Typography variant="body2">
-                    {readout.edited ? 'Use this correction for training' : 'Use this mask as a training label'}
-                  </Typography>
-                  <Key>T</Key>
-                </Stack>
-              }
-              sx={{ mr: 0 }}
-            />
-            <ToggleButtonGroup
-              exclusive
-              size="small"
-              fullWidth
-              value={grade}
-              onChange={(event, value) => value && setGrade(value)}
-              disabled={!useForTraining}
-              sx={{
-                '& .MuiToggleButton-root.Mui-selected': { color: 'primary.main', bgcolor: 'primary.lighter', borderColor: 'primary.light' }
-              }}
-            >
-              <ToggleButton value="rough">Rough fix</ToggleButton>
-              <ToggleButton value="training-grade">Training-grade</ToggleButton>
-            </ToggleButtonGroup>
-            <Typography variant="caption" color="text.secondary">
-              Rough = counts for the number, not for boundary learning
-            </Typography>
-
-            <Divider />
-
-            <Button variant="contained" size="large" startIcon={<CheckOutlined />} onClick={accept} fullWidth>
-              Accept <Box sx={{ ml: 1 }}>{<Key>A</Key>}</Box>
-            </Button>
-            <Button variant="outlined" color="error" startIcon={<CloseOutlined />} onClick={reject} fullWidth>
-              Reject <Box sx={{ ml: 1 }}>{<Key>R</Key>}</Box>
-            </Button>
-            <Typography variant="caption" color="text.secondary" align="center">
-              Accept advances automatically · reject drops the plot from this date&apos;s trait series
-            </Typography>
-
-            {compare && (
+            {!bundle ? (
+              <Typography variant="caption" color="text.secondary">
+                Accepting, rejecting and correcting plots arrive with the plot images. Use → and ← to step through the queue.
+              </Typography>
+            ) : (
               <>
-                <Divider />
-                <Stack sx={{ gap: 1 }}>
-                  <Typography variant="caption" color="text.secondary">
-                    Compare · previous date
-                  </Typography>
-                  {previousFlight && previousPlot && bundle ? (
-                    <Stack direction="row" sx={{ gap: 1.5, alignItems: 'center' }}>
-                      <PlotThumb bundle={bundle} plot={previousPlot.demo} width={120} tint={EDIT_TINT} />
-                      <Stack>
-                        <Typography variant="body2" sx={mono}>
-                          {previousFlight.flightDate}
-                        </Typography>
-                        <Typography variant="body2" sx={mono}>
-                          {previousPlot.cover.toFixed(1)}% → {readout.liveCover.toFixed(1)}%
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {previousFlight.dap} → {flight.dap} DAP
-                        </Typography>
-                      </Stack>
+                <FormControlLabel
+                  control={<Checkbox checked={useForTraining} onChange={(event) => setUseForTraining(event.target.checked)} />}
+                  label={
+                    <Stack direction="row" sx={{ gap: 1, alignItems: 'center' }}>
+                      <Typography variant="body2">
+                        {readout.edited ? 'Use this correction for training' : 'Use this mask as a training label'}
+                      </Typography>
+                      <Key>T</Key>
                     </Stack>
-                  ) : (
-                    <Typography variant="body2" color="text.secondary">
-                      No earlier date for this plot.
-                    </Typography>
-                  )}
-                </Stack>
+                  }
+                  sx={{ mr: 0 }}
+                />
+                <ToggleButtonGroup
+                  exclusive
+                  size="small"
+                  fullWidth
+                  value={grade}
+                  onChange={(event, value) => value && setGrade(value)}
+                  disabled={!useForTraining}
+                  sx={{
+                    '& .MuiToggleButton-root.Mui-selected': {
+                      color: 'primary.main',
+                      bgcolor: 'primary.lighter',
+                      borderColor: 'primary.light'
+                    }
+                  }}
+                >
+                  <ToggleButton value="rough">Rough fix</ToggleButton>
+                  <ToggleButton value="training-grade">Training-grade</ToggleButton>
+                </ToggleButtonGroup>
+                <Typography variant="caption" color="text.secondary">
+                  Rough = counts for the number, not for boundary learning
+                </Typography>
+
+                <Divider />
+
+                <Button variant="contained" size="large" startIcon={<CheckOutlined />} onClick={accept} fullWidth>
+                  Accept <Box sx={{ ml: 1 }}>{<Key>A</Key>}</Box>
+                </Button>
+                <Button variant="outlined" color="error" startIcon={<CloseOutlined />} onClick={reject} fullWidth>
+                  Reject <Box sx={{ ml: 1 }}>{<Key>R</Key>}</Box>
+                </Button>
+                <Typography variant="caption" color="text.secondary" align="center">
+                  Accept advances automatically · reject drops the plot from this date&apos;s trait series
+                </Typography>
+
+                {compare && (
+                  <>
+                    <Divider />
+                    <Stack sx={{ gap: 1 }}>
+                      <Typography variant="caption" color="text.secondary">
+                        Compare · previous date
+                      </Typography>
+                      {previousFlight && previousPlot && bundle ? (
+                        <Stack direction="row" sx={{ gap: 1.5, alignItems: 'center' }}>
+                          <PlotThumb bundle={bundle} plot={previousPlot.demo} width={120} tint={EDIT_TINT} />
+                          <Stack>
+                            <Typography variant="body2" sx={mono}>
+                              {previousFlight.flightDate}
+                            </Typography>
+                            <Typography variant="body2" sx={mono}>
+                              {previousPlot.cover.toFixed(1)}% → {readout.liveCover.toFixed(1)}%
+                            </Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {previousFlight.dap} → {flight.dap} DAP
+                            </Typography>
+                          </Stack>
+                        </Stack>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">
+                          No earlier date for this plot.
+                        </Typography>
+                      )}
+                    </Stack>
+                  </>
+                )}
               </>
             )}
           </Stack>
@@ -681,20 +710,7 @@ export default function Reviewer() {
           bgcolor: 'background.paper'
         }}
       >
-        {[
-          ['→ ←', 'next / prev'],
-          ['space', 'hold original'],
-          ['A', 'accept'],
-          ['R', 'reject'],
-          ['E', 'brush'],
-          ['X', 'add / erase'],
-          ['[ ]', 'size'],
-          ['⌘Z', 'undo'],
-          ['1–5', 'opacity'],
-          ['C', 'compare date'],
-          ['T', 'training contribution'],
-          ['Esc', 'exit']
-        ].map(([key, label]) => (
+        {(bundle ? KEYS : KEYS.filter(([key]) => key === '→ ←' || key === 'Esc')).map(([key, label]) => (
           <Typography key={key} variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <Key>{key}</Key> {label}
           </Typography>
@@ -703,3 +719,20 @@ export default function Reviewer() {
     </>
   );
 }
+
+// The keyboard contract, shown along the bottom. Without plot images only
+// stepping and exiting do anything, so only they are listed then.
+const KEYS = [
+  ['→ ←', 'next / prev'],
+  ['space', 'hold original'],
+  ['A', 'accept'],
+  ['R', 'reject'],
+  ['E', 'brush'],
+  ['X', 'add / erase'],
+  ['[ ]', 'size'],
+  ['⌘Z', 'undo'],
+  ['1–5', 'opacity'],
+  ['C', 'compare date'],
+  ['T', 'training contribution'],
+  ['Esc', 'exit']
+];

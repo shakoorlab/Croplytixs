@@ -29,6 +29,7 @@ import GrowthCurves from 'sections/trials/traits/GrowthCurves';
 import TraitsTable from 'sections/trials/traits/TraitsTable';
 import { NESTED_PANEL, NESTED_PANEL_FRAMED } from 'sections/trials/surfaces';
 import { useTrialResults } from 'api/results';
+import { trialSubtitle } from 'api/trials';
 import { buildTraitSeries, downloadText, traitsToCsv } from 'api/traits';
 import { MODELS } from 'api/models';
 
@@ -123,7 +124,7 @@ export default function TrialTraits() {
         <PageHeader
           crumbs={[...crumbs, { label: trial?.name || trialId, to: `/trials/${trialId}` }, { label: 'Traits' }]}
           title={trial?.name || 'Loading trial…'}
-          subtitle={trial ? `${trial.crop} · ${trial.site} · ${trial.plots} plots` : undefined}
+          subtitle={trialSubtitle(trial)}
           actions={
             <Stack direction="row" sx={{ gap: 1 }}>
               <Tooltip title="Per-plot masks as PNG + GeoTIFF-aligned index, with the run manifest — arrives with the processing worker">

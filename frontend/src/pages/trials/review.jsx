@@ -7,13 +7,14 @@ import Grid from '@mui/material/Grid';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
-import Chip from '@mui/material/Chip';
 import Alert from '@mui/material/Alert';
 import LinearProgress from '@mui/material/LinearProgress';
 import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
 import FormControl from '@mui/material/FormControl';
+import InputAdornment from '@mui/material/InputAdornment';
 import InputLabel from '@mui/material/InputLabel';
+import OutlinedInput from '@mui/material/OutlinedInput';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 
@@ -21,14 +22,15 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import PageHeader from 'components/PageHeader';
 import StatTile from 'components/StatTile';
 import TrialTabs from 'sections/trials/TrialTabs';
-import PlotThumb from 'sections/trials/PlotThumb';
-import QcChip from 'sections/trials/QcChip';
+import PlotReviewTable from 'sections/trials/review/PlotReviewTable';
 import { NESTED_PANEL_FRAMED } from 'sections/trials/surfaces';
-import { FLAG_LABELS, useTrialResults } from 'api/results';
+import { useTrialResults } from 'api/results';
+import { trialSubtitle } from 'api/trials';
 
 // assets
 import PlayCircleOutlined from '@ant-design/icons/PlayCircleOutlined';
 import LoadingOutlined from '@ant-design/icons/LoadingOutlined';
+import SearchOutlined from '@ant-design/icons/SearchOutlined';
 
 const mono = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' };
 const NONE = [];
@@ -59,23 +61,26 @@ function matches(plot, filter) {
 // ==============================|| TRIALS - REVIEW ||============================== //
 
 /**
- * The triage gallery. Only plots the model was unsure about — plus a small
+ * The triage list. Only plots the model was unsure about — plus a small
  * random audit sample of the ones it was sure about — need a human; everything
- * else is already in the trait series. The gallery exists to decide *which*
- * plots get the Reviewer's full-screen attention, not to review them here.
+ * else is already in the trait series. The table exists to decide *which*
+ * plots get the Reviewer's full-screen attention: why each was flagged and the
+ * number behind it, how its cover moved since the previous date, sortable on
+ * every column. A row opens that plot in the Reviewer.
  */
 export default function TrialReview() {
   const { trialId } = useParams();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const { trial, flights, anchorId, isLoading, error, trialError } = useTrialResults(trialId);
-  // Per-plot imagery comes with results from the API; until then there are no plots to draw.
-  const bundle = null;
 
   const [filter, setFilter] = useState('queue');
-  const [reason, setReason] = useState(null);
+  const [search, setSearch] = useState('');
 
-  const complete = flights.filter((flight) => flight.status === 'complete');
+  // Only flights whose results have arrived. Coming from the Flights table, the
+  // flights are already cached but their plots are still on the way; a flight
+  // without them has no summary to show yet (isLoading covers the wait).
+  const complete = flights.filter((flight) => flight.status === 'complete' && flight.results);
   const requested = params.get('flight');
   const flightId = complete.some((flight) => flight.id === requested) ? requested : anchorId;
   const flight = complete.find((candidate) => candidate.id === flightId) || null;
@@ -84,18 +89,33 @@ export default function TrialReview() {
   const plots = flight?.results?.plots || NONE;
   const summary = flight?.results?.summary;
 
-  const reasons = useMemo(() => {
-    const counts = {};
-    plots.forEach((plot) => {
-      if (plot.flag) counts[plot.flag] = (counts[plot.flag] || 0) + 1;
-    });
-    return Object.entries(counts).sort((a, b) => b[1] - a[1]);
-  }, [plots]);
-
-  const visible = useMemo(
-    () => plots.filter((plot) => matches(plot, filter) && (!reason || plot.flag === reason)),
-    [plots, filter, reason]
+  // The date before this one with results, to show how each plot's cover moved.
+  const earlier = flight ? complete.filter((candidate) => candidate.flightDate < flight.flightDate) : NONE;
+  const previousFlight = earlier.reduce((best, candidate) => (!best || candidate.flightDate > best.flightDate ? candidate : best), null);
+  const previous = useMemo(
+    () => (previousFlight ? new Map(previousFlight.results.plots.map((plot) => [plot.plotId, plot])) : null),
+    [previousFlight]
   );
+  // The field's median change between the two dates: a plot's change is judged against it.
+  const typicalChange = useMemo(() => {
+    if (!previous) return null;
+    const changes = plots
+      .filter((plot) => previous.has(plot.plotId))
+      .map((plot) => plot.cover - previous.get(plot.plotId).cover)
+      .sort((a, b) => a - b);
+    if (!changes.length) return null;
+    const mid = Math.floor(changes.length / 2);
+    return changes.length % 2 ? changes[mid] : (changes[mid - 1] + changes[mid]) / 2;
+  }, [plots, previous]);
+  const hasRep = plots.some((plot) => plot.rep != null && plot.rep !== '');
+
+  const visible = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return plots.filter(
+      (plot) =>
+        matches(plot, filter) && (!needle || `${plot.plotId} g${plot.genotype} r${plot.row}c${plot.col}`.toLowerCase().includes(needle))
+    );
+  }, [plots, filter, search]);
 
   const crumbs = [
     { label: 'Croplytix', to: '/' },
@@ -138,7 +158,7 @@ export default function TrialReview() {
         <PageHeader
           crumbs={[...crumbs, { label: trial?.name || trialId, to: `/trials/${trialId}` }, { label: 'Review' }]}
           title={trial?.name || 'Loading trial…'}
-          subtitle={trial ? `${trial.crop} · ${trial.site} · ${trial.plots} plots` : undefined}
+          subtitle={trialSubtitle(trial)}
           actions={
             summary && summary.pending > 0 ? (
               <Button variant="contained" startIcon={<PlayCircleOutlined />} onClick={() => openReviewer()}>
@@ -199,9 +219,6 @@ export default function TrialReview() {
                     ))}
                   </Select>
                 </FormControl>
-                <Typography variant="caption" color="text.secondary">
-                  {plots.length} plots · {flight.model} · {flight.dap} DAP
-                </Typography>
               </Stack>
 
               {/* ---- summary ---- */}
@@ -238,7 +255,7 @@ export default function TrialReview() {
                 <StatTile
                   label="Mean cover"
                   value={summary.meanCover == null ? '—' : `${summary.meanCover.toFixed(1)}%`}
-                  hint="QC-accepted plots"
+                  hint="canopy inside each box"
                 />
               </Stack>
 
@@ -265,80 +282,45 @@ export default function TrialReview() {
                   ))}
                 </ToggleButtonGroup>
 
-                {reasons.map(([key, count]) => (
-                  <Chip
-                    key={key}
-                    size="small"
-                    clickable
-                    label={`${FLAG_LABELS[key]} · ${count}`}
-                    onClick={() => setReason(reason === key ? null : key)}
-                    sx={{
-                      bgcolor: reason === key ? 'warning.lighter' : 'grey.100',
-                      color: reason === key ? 'warning.main' : 'text.secondary',
-                      borderColor: reason === key ? 'warning.light' : undefined
-                    }}
-                  />
-                ))}
-
                 <Box sx={{ flex: 1 }} />
-                <Typography variant="caption" color="text.secondary">
-                  {visible.length} of {plots.length} plots · {flight.model}
-                </Typography>
+                <OutlinedInput
+                  size="small"
+                  placeholder="Plot, genotype, r5c8"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  inputProps={{ 'aria-label': 'Find a plot' }}
+                  startAdornment={
+                    <InputAdornment position="start">
+                      <SearchOutlined />
+                    </InputAdornment>
+                  }
+                  sx={{ width: 220 }}
+                />
               </Stack>
 
-              {/* ---- gallery ---- */}
-              {visible.length === 0 ? (
+              {/* ---- the plots ---- */}
+              {filter === 'queue' && plots.every((plot) => !matches(plot, 'queue')) ? (
                 <Stack sx={(theme) => ({ ...NESTED_PANEL_FRAMED(theme), alignItems: 'center', gap: 1, py: 6 })}>
-                  <Typography variant="subtitle1">Nothing here</Typography>
+                  <Typography variant="subtitle1">Nothing needs review</Typography>
                   <Typography variant="body2" color="text.secondary">
-                    {filter === 'queue' ? 'Every flagged plot on this flight has been reviewed.' : 'No plots match this filter.'}
+                    No plot on this flight was flagged. All plots shows every one.
                   </Typography>
                 </Stack>
               ) : (
-                <Grid container spacing={1.5}>
-                  {visible.map((plot) => (
-                    <Grid key={plot.plotId} size={{ xs: 6, sm: 4, md: 3, lg: 2 }}>
-                      <Stack
-                        onClick={() => openReviewer(plot.plotId)}
-                        sx={(theme) => ({
-                          ...NESTED_PANEL_FRAMED(theme),
-                          p: 1,
-                          gap: 0.75,
-                          cursor: 'pointer',
-                          transition: 'border-color 120ms',
-                          '&:hover': { borderColor: 'primary.main' }
-                        })}
-                      >
-                        {bundle && <PlotThumb bundle={bundle} plot={plot.demo} width={176} sx={{ width: '100%', height: 'auto' }} />}
-                        <Stack direction="row" sx={{ alignItems: 'baseline', gap: 1 }}>
-                          <Typography variant="subtitle2" sx={mono}>
-                            {plot.plotId}
-                          </Typography>
-                          <Box sx={{ flex: 1 }} />
-                          <Typography variant="subtitle2" sx={mono}>
-                            {plot.cover.toFixed(1)}%
-                          </Typography>
-                        </Stack>
-                        <Stack direction="row" sx={{ alignItems: 'center', gap: 1 }}>
-                          <Typography variant="caption" color="text.secondary" noWrap sx={{ flex: 1, minWidth: 0 }}>
-                            G{plot.genotype} · r{plot.row} c{plot.col}
-                          </Typography>
-                          {!(plot.qc === 'pending' && plot.flag) && (
-                            <QcChip
-                              qc={plot.qc}
-                              edited={plot.decision?.edited}
-                              audit={plot.audit}
-                              sx={{ height: 18, fontSize: '0.65rem' }}
-                            />
-                          )}
-                        </Stack>
-                        <Typography variant="caption" noWrap sx={{ color: plot.flag ? 'warning.main' : 'text.secondary' }}>
-                          {plot.flag ? FLAG_LABELS[plot.flag] : `Confidence ${plot.confidence.toFixed(2)}`}
-                        </Typography>
-                      </Stack>
-                    </Grid>
-                  ))}
-                </Grid>
+                <Stack sx={{ gap: 1 }}>
+                  <PlotReviewTable
+                    plots={visible}
+                    previous={previous}
+                    previousDate={previousFlight?.flightDate || null}
+                    typicalChange={typicalChange}
+                    hasRep={hasRep}
+                    onOpen={openReviewer}
+                    emptyText="No plots match this filter."
+                  />
+                  <Typography variant="caption" color="text.secondary" align="right">
+                    {visible.length} of {plots.length} plots
+                  </Typography>
+                </Stack>
               )}
             </Stack>
           )}

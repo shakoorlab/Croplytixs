@@ -41,6 +41,24 @@ export const FLIGHT_STATUSES = {
   failed: 'Processing stopped with an error. The flight’s page says why.'
 };
 
+/**
+ * How many plots a trial has and where that number comes from: its plot roster
+ * when one was given, otherwise the plot grid of its newest flight (`gridPlots`,
+ * derived by the API). null until there is either.
+ */
+export function trialPlots(trial) {
+  if (trial?.plots > 0) return { count: trial.plots, source: 'roster' };
+  if (trial?.gridPlots > 0) return { count: trial.gridPlots, source: 'grid' };
+  return null;
+}
+
+/** "Yam · Roujol · 144 plots" for page headers; the plot count only once one is known. */
+export function trialSubtitle(trial) {
+  if (!trial) return undefined;
+  const plots = trialPlots(trial);
+  return [trial.crop, trial.site, plots && `${plots.count} plots`].filter(Boolean).join(' · ');
+}
+
 export function useTrials() {
   return useSWR(trialsKey(), fetcher, opts);
 }

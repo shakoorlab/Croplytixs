@@ -314,7 +314,9 @@ export default function FlightDateSetup() {
             { label: 'Upload Imagery' }
           ]}
           title="Upload Imagery"
-          subtitle={trial ? `${trial.crop} · ${trial.site} · ${trial.plots} plots in roster` : undefined}
+          subtitle={
+            trial ? `${trial.crop} · ${trial.site} · ${trial.plots ? `${trial.plots} plots in roster` : 'no plot roster'}` : undefined
+          }
           actions={
             <Button size="small" color="secondary" onClick={() => navigate(flightsUrl)}>
               Cancel

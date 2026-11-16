@@ -1,3 +1,4 @@
+import PropTypes from 'prop-types';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -22,13 +23,38 @@ import TableRow from '@mui/material/TableRow';
 import MainCard from 'components/MainCard';
 import PageHeader from 'components/PageHeader';
 import NewTrialDialog from 'sections/trials/NewTrialDialog';
-import { createTrial, useTrials } from 'api/trials';
+import { createTrial, trialPlots, useTrials } from 'api/trials';
 import formatRelative from 'utils/formatRelative';
 
 // assets
 import PlusOutlined from '@ant-design/icons/PlusOutlined';
 
 const mono = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.8125rem' };
+
+/**
+ * The trial's plot count. Without a roster it comes from the newest flight's
+ * plot grid, and the tooltip says so; before either, a dash says what fills it.
+ */
+function PlotCount({ trial }) {
+  const plots = trialPlots(trial);
+  if (!plots) {
+    return (
+      <Tooltip title="No plot roster or plot grid yet. It fills in when a flight with a plot grid is uploaded.">
+        <Box component="span" sx={{ color: 'text.disabled' }}>
+          —
+        </Box>
+      </Tooltip>
+    );
+  }
+  if (plots.source === 'roster') return plots.count;
+  return (
+    <Tooltip title="From the newest flight’s plot grid. The trial has no plot roster.">
+      <Box component="span">{plots.count}</Box>
+    </Tooltip>
+  );
+}
+
+PlotCount.propTypes = { trial: PropTypes.object.isRequired };
 
 // ==============================|| TRIALS - LOBBY ||============================== //
 
@@ -65,6 +91,7 @@ export default function TrialsLobby() {
 
   // Every column is the API's own: processed, expected and flagged are derived
   // from the trial's flights on the server, so this list agrees with the trial.
+  // Plots is the roster's count, or the newest flight's plot grid without one.
   const rows = trials || [];
 
   return (
@@ -105,14 +132,14 @@ export default function TrialsLobby() {
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell>Trial</TableCell>
-                  <TableCell>Crop</TableCell>
-                  <TableCell>Site</TableCell>
-                  <TableCell align="right">Plots</TableCell>
-                  <TableCell align="right">Flights</TableCell>
-                  <TableCell>Processed</TableCell>
-                  <TableCell>Needs review</TableCell>
-                  <TableCell>Last activity</TableCell>
+                  <TableCell align="center">Trial</TableCell>
+                  <TableCell align="center">Crop</TableCell>
+                  <TableCell align="center">Site</TableCell>
+                  <TableCell align="center">Plots</TableCell>
+                  <TableCell align="center">Flights</TableCell>
+                  <TableCell align="center">Processed</TableCell>
+                  <TableCell align="center">Needs review</TableCell>
+                  <TableCell align="center">Last activity</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -130,36 +157,30 @@ export default function TrialsLobby() {
                 )}
                 {rows.map((trial) => (
                   <TableRow key={trial.id} hover sx={{ cursor: 'pointer' }} onClick={() => navigate(`/trials/${trial.id}`)}>
-                    <TableCell>
-                      <Stack sx={{ gap: 0.25 }}>
+                    <TableCell align="center">
+                      <Stack sx={{ gap: 0.25, alignItems: 'center' }}>
                         <Typography variant="subtitle2">{trial.name}</Typography>
                         <Typography variant="caption" color="text.secondary">
                           {trial.season} season
                         </Typography>
                       </Stack>
                     </TableCell>
-                    <TableCell>{trial.crop}</TableCell>
-                    <TableCell>
+                    <TableCell align="center">{trial.crop}</TableCell>
+                    <TableCell align="center">
                       <Typography variant="caption" color="text.secondary">
                         {trial.site}
                       </Typography>
                     </TableCell>
-                    <TableCell sx={mono} align="right">
-                      {trial.plots > 0 ? (
-                        trial.plots
-                      ) : (
-                        <Tooltip title="Plot roster not set — add a plot map from trial settings">
-                          <Box component="span" sx={{ color: 'text.disabled' }}>
-                            —
-                          </Box>
-                        </Tooltip>
-                      )}
+                    <TableCell sx={mono} align="center">
+                      <PlotCount trial={trial} />
                     </TableCell>
-                    <TableCell sx={mono} align="right">
+                    <TableCell sx={mono} align="center">
                       {trial.flightDates}
                     </TableCell>
-                    <TableCell sx={mono}>{trial.expected ? `${trial.processed} / ${trial.expected}` : '—'}</TableCell>
-                    <TableCell>
+                    <TableCell sx={mono} align="center">
+                      {trial.expected ? `${trial.processed} / ${trial.expected}` : '—'}
+                    </TableCell>
+                    <TableCell align="center">
                       {trial.flagged > 0 ? (
                         <Chip size="small" label={`${trial.flagged} flagged`} sx={{ bgcolor: 'warning.lighter', color: 'warning.main' }} />
                       ) : trial.expected ? (
@@ -168,7 +189,7 @@ export default function TrialsLobby() {
                         <Chip size="small" label="No flights" sx={{ bgcolor: 'grey.100', color: 'text.secondary' }} />
                       )}
                     </TableCell>
-                    <TableCell>
+                    <TableCell align="center">
                       <Typography variant="caption" color="text.secondary">
                         {formatRelative(trial.lastActivity)}
                       </Typography>
