@@ -11,16 +11,17 @@ import { resultsPath, useFlights, useTrial } from './trials';
  * Traits are built on. Each processed flight carries a summary of its current
  * result (`flight.result`); the plots themselves come from
  * `GET /api/trials/{id}/flights/{fid}/results?version=n`, fetched together for
- * every flight that has one. A version never changes once written, so those
- * stay cached.
+ * every flight that has one. A version's numbers never change once written, so
+ * those stay cached; a review decision made here patches the cache.
  *
  * Each plot is what the processing job wrote (backend/app/pipeline/report.py):
  * `areaCm2`/`areaM2` are the watershed's canopy area (including canopy past
  * the plot's box), `cover` is canopy inside the box as % of the box,
  * `confidence` is the model's certainty over the box (0–1) and `flag` is the
- * most serious QC flag, if any. Review decisions aren't stored yet, so every
- * flagged plot is `pending` and the rest `passed` (QcChip: "Auto-passed");
- * `accepted` and `rejected` are left for a reviewer.
+ * most serious QC flag, if any. `qc` is the model's call (`pending` for a
+ * flagged plot, `passed` otherwise; QcChip: "Auto-passed") until a person
+ * accepts or rejects the plot: the API merges decisions in (api/decisions.js),
+ * and the summary's counts follow.
  */
 
 export const FLAG_LABELS = {
@@ -83,6 +84,7 @@ export function useTrialResults(trialId) {
   }, [flights, resultsQuery.data, planting]);
 
   // The newest flight with results: the one Review and the Reviewer open on.
+  // (Decisions patch this cache in place, so it isn't refetched after each one.)
   const anchorId = enriched.find((flight) => flight.results)?.id || null;
 
   return {

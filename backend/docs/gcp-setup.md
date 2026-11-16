@@ -697,6 +697,68 @@ several hundred MB in Artifact Registry, past the free 0.5 GB on its own (about
 $0.10 per GB-month beyond it), so keep the cleanup policy from the frontend
 checklist. Each result adds a few MB to the bucket.
 
+## 14. Map files in the browser — signed links to the bucket
+
+The Reviewer draws each plot from the flight's map files: the viewing COG ingest
+built (`derived/view.tif`) and the result's assignment raster (`results/v<n>/assignment.tif`,
+which plot each canopy pixel went to). The browser reads a few 512 px tiles of
+each with HTTP Range requests, straight from the bucket, so a plot of a 5 GB
+orthophoto costs a few hundred KB and the API never carries the bytes.
+
+The bucket stays private. The API hands the browser *signed URLs*
+(`GET …/flights/{id}/map`): a link that reads one object for an hour
+(`MAP_LINK_MINUTES`). Two things make that work on Cloud Run:
+
+```bash
+# 1. Signing. The API's identity on Cloud Run has no private key, so it signs
+#    through the IAM Credentials API, as itself. That needs the API on, and the
+#    service account allowed to sign as itself (it can't act as any other).
+gcloud services enable iamcredentials.googleapis.com
+gcloud iam service-accounts add-iam-policy-binding $SA_EMAIL \
+  --member="serviceAccount:$SA_EMAIL" \
+  --role="roles/iam.serviceAccountTokenCreator"
+```
+
+```bash
+# 2. CORS. Signed URLs are Cloud Storage's XML API, which answers a browser on
+#    another origin only as the bucket's CORS rule allows. The rule names the
+#    web app's address and the local dev server's, allows reading only, and
+#    lets the browser send Range and see Content-Range (geotiff.js needs both).
+#    Uploads are unaffected: they go through the JSON API, which allows CORS
+#    on its own.
+export WEB_URL=$(gcloud run services describe croplytix-web --region $REGION --format='value(status.url)')
+printf '[{"origin": ["%s", "http://localhost:3000"], "method": ["GET", "HEAD"], "responseHeader": ["Content-Type", "Content-Range", "Content-Length", "Accept-Ranges", "Range", "ETag"], "maxAgeSeconds": 3600}]\n' "$WEB_URL" > /tmp/croplytix-cors.json
+gcloud storage buckets update gs://$BUCKET --cors-file=/tmp/croplytix-cors.json
+gcloud storage buckets describe gs://$BUCKET --format="default(cors_config)"
+```
+
+If you open the app at any other address (a custom domain, or Cloud Run's other
+`…run.app` URL for the same service), add it to `origin` and run the update again.
+
+Then deploy the code that uses it: the API (the endpoint), the processing job
+(results now record each plot's box and its value in the assignment raster), and
+the web app (the Reviewer):
+
+```bash
+gcloud run deploy croplytix-api --source . --region $REGION --env-vars-file deploy/env.cloudrun.yaml
+gcloud builds submit --config cloudbuild.process.yaml .
+gcloud run jobs update croplytix-process --region $REGION --image $PROCESS_IMAGE
+cd ../frontend && gcloud run deploy croplytix-web --source . --region $REGION && cd ../backend
+```
+
+Results made before this have no plot boxes; the Reviewer says so. **Run again**
+on the flight's page makes a new version with them, reusing the canopy map, so
+only the watershed reruns.
+
+*Check it:* open a flagged plot in the Reviewer; the photo should appear with the
+plot's canopy in magenta. If the page says the API couldn't sign links, step 1
+hasn't taken effect yet (IAM changes can take a minute or two). If the browser's
+console shows a CORS error on `storage.googleapis.com`, the origin in step 2
+doesn't match the address in the address bar.
+
+*What it costs:* signing is free; each plot reads a few hundred KB from the
+bucket, a small fraction of the free tier's monthly egress even for heavy reviewing.
+
 ## Optional, but the best lesson in here: run the API on your laptop against the real cloud
 
 ```bash

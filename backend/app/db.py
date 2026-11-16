@@ -15,6 +15,8 @@ Firestore layout
 ----------------
     trials/{accountId}:{trialId}   one document per trial
     flights/{flightId}             one document per flight
+    results/{flightId}:v{n}        one per processing run, never changed
+    decisions/{flightId}:{plotId}  a person's Accept or Reject on a plot (app/review.py)
 
 A trial's id (`guadeloupe-yam-2026`, minted from its name) only has to be
 unique within its account, so the account is part of the document id. Two
@@ -94,6 +96,12 @@ class Repo(Protocol):
     def list_results(self, flight_id: str) -> list[Doc]:
         """Newest version first."""
 
+    # review decisions — one per plot of a flight (app/review.py), reached only
+    # through the flight, like results.
+    def get_decision(self, decision_id: str) -> Doc | None: ...
+    def put_decision(self, doc: Doc) -> Doc: ...
+    def list_decisions(self, flight_id: str) -> list[Doc]: ...
+
     def describe(self) -> str: ...
 
 
@@ -105,6 +113,7 @@ class MemoryRepo:
         self._trials: dict[str, Doc] = {}  # by trial_key
         self._flights: dict[str, Doc] = {}
         self._results: dict[str, Doc] = {}
+        self._decisions: dict[str, Doc] = {}
 
     def create_trial(self, doc: Doc) -> Doc:
         self._trials[trial_key(doc["accountId"], doc["id"])] = dict(doc)
@@ -163,6 +172,17 @@ class MemoryRepo:
         rows = [dict(d) for d in self._results.values() if d.get("flightId") == flight_id]
         return sorted(rows, key=lambda d: d.get("version", 0), reverse=True)
 
+    def get_decision(self, decision_id: str) -> Doc | None:
+        doc = self._decisions.get(decision_id)
+        return dict(doc) if doc else None
+
+    def put_decision(self, doc: Doc) -> Doc:
+        self._decisions[doc["id"]] = dict(doc)
+        return doc
+
+    def list_decisions(self, flight_id: str) -> list[Doc]:
+        return [dict(d) for d in self._decisions.values() if d.get("flightId") == flight_id]
+
     def describe(self) -> str:
         return "memory"
 
@@ -174,6 +194,7 @@ class FirestoreRepo:
     TRIALS = "trials"
     FLIGHTS = "flights"
     RESULTS = "results"
+    DECISIONS = "decisions"
 
     def __init__(self, project: str | None = None, database: str = "(default)"):
         from google.cloud import firestore
@@ -260,6 +281,18 @@ class FirestoreRepo:
         # One equality filter, so no composite index; sorted here.
         rows = [s.to_dict() for s in self._where(self.RESULTS, "flightId", flight_id).stream()]
         return sorted(rows, key=lambda d: d.get("version", 0), reverse=True)
+
+    # -- review decisions ----------------------------------------------------------
+    def get_decision(self, decision_id: str) -> Doc | None:
+        snap = self._db.collection(self.DECISIONS).document(decision_id).get()
+        return snap.to_dict() if snap.exists else None
+
+    def put_decision(self, doc: Doc) -> Doc:
+        self._db.collection(self.DECISIONS).document(doc["id"]).set(doc)
+        return doc
+
+    def list_decisions(self, flight_id: str) -> list[Doc]:
+        return [s.to_dict() for s in self._where(self.DECISIONS, "flightId", flight_id).stream()]
 
     def describe(self) -> str:
         return f"firestore:{self._database}"

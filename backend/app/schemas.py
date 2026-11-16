@@ -221,6 +221,13 @@ class ProcessRequest(BaseModel):
     modelId: str | None = None  # the default model when left out (app/model_registry.py)
 
 
+class DecisionRequest(BaseModel):
+    """A person's call on a plot's measurement (app/review.py)."""
+
+    decision: Literal["accepted", "rejected"]
+    note: str | None = Field(default=None, max_length=500)
+
+
 class PlotResult(BaseModel):
     """One plot of a result. Areas are the watershed's (canopy assigned to the
     plot, including past its box); `cover` is canopy inside the box as a share
@@ -229,6 +236,10 @@ class PlotResult(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     plotId: str
+    # The plot's value in the result's assignment raster, and its box outline in
+    # the orthophoto's CRS: what the Reviewer draws. Absent on older results.
+    label: int | None = None
+    box: list[list[float]] | None = None
     file: str
     row: int | None = None
     col: int | None = None
@@ -248,7 +259,15 @@ class PlotResult(BaseModel):
     flags: list[str] = []
     flag: str | None = None
     flagLabel: str | None = None
-    qc: str
+    qc: str  # pending / passed from the model; accepted / rejected once a person decides
+    # Who decided what and when, on which version; `stale` when the measurement
+    # has changed since, so the decision no longer stands (app/review.py).
+    decision: dict[str, Any] | None = None
+
+
+class DecisionOutcome(BaseModel):
+    plot: PlotResult  # the plot as results now show it
+    summary: dict[str, Any]  # the version's summary, recounted
 
 
 class ResultVersion(BaseModel):
@@ -259,6 +278,32 @@ class ResultVersion(BaseModel):
     plots: int
     meanCover: float
     current: bool
+
+
+class MapLink(BaseModel):
+    url: str  # a credential for this one file until the links expire: never log it
+    bytes: int | None = None
+
+
+class ResultLayers(BaseModel):
+    version: int
+    assignment: MapLink  # which plot each canopy pixel went to, in the field's grid
+    # The value marking canopy no plot reached; 0 is no canopy. None for results
+    # made before it was recorded (both were 0 then).
+    noPlotValue: int | None = None
+    # Whether the result's plots carry `label` (their value in the assignment
+    # raster) and `box` (their outline), which drawing a plot needs.
+    plotBoxes: bool = False
+
+
+class FlightMap(BaseModel):
+    """Short-lived links the browser reads the map files through, straight from
+    the bucket, a few tiles at a time (app/storage.py)."""
+
+    expiresAt: str
+    expiresInSeconds: int
+    view: MapLink  # the viewing COG: natural-colour RGB, 512 px tiles, overviews
+    result: ResultLayers | None = None
 
 
 class FlightResults(BaseModel):

@@ -179,7 +179,8 @@ def test_every_api_route_requires_sign_in():
     # /api/local-uploads exists only with STORAGE_BACKEND=local (so in these tests):
     # a stand-in for Cloud Storage's upload sessions, whose unguessable session
     # id is the credential, as it is for Cloud Storage. See app/routers/local_uploads.py.
-    public = {"/api/health", "/api/local-uploads/{session_id}"}
+    # /api/local-objects likewise: the signed link is the credential (app/routers/local_objects.py).
+    public = {"/api/health", "/api/local-uploads/{session_id}", "/api/local-objects/{token}"}
     routes = [r for r in app.routes if isinstance(r, APIRoute) and r.path.startswith("/api") and r.path not in public]
     assert routes, "no /api routes found"
     unguarded = [f"{sorted(r.methods)} {r.path}" for r in routes if not _runs(r.dependant, current_user)]

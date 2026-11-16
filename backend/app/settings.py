@@ -101,6 +101,11 @@ class Settings(BaseSettings):
     # so 150 MP is ~6 GB of the job's 8 GiB (about 8 ha at 2.3 cm).
     PROCESS_MAX_MEGAPIXELS: int = 150
 
+    # ---- reading the map files in the browser ---------------------------------
+    # How long a signed link to a map file (the viewing COG, a result's
+    # assignment raster) works. The browser asks for fresh links before then.
+    MAP_LINK_MINUTES: int = 60
+
     @property
     def cors_origins(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]

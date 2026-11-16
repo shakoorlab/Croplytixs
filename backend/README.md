@@ -79,20 +79,24 @@ the end of `docs/gcp-setup.md` (Application Default Credentials).
 | GET | `/api/trials/{trial_id}/flights/{flight_id}/files/{role}/{name}` | stream a stored file back (up to 32 MiB) |
 | POST | `/api/trials/{trial_id}/flights/{flight_id}/process` | measure canopy per plot as a new result version (`{modelId}` optional; `?force=true` if stuck) |
 | GET | `/api/trials/{trial_id}/flights/{flight_id}/results` | the current result (or `?version=n`): summary, every plot, all versions |
-| GET | `/api/trials/{trial_id}/flights/{flight_id}/results/csv` | the result as CSV (the research pipeline's columns first) |
+| GET | `/api/trials/{trial_id}/flights/{flight_id}/results/csv` | the result as CSV (the research pipeline's columns first, each plot's review last) |
+| PUT / DELETE | `/api/trials/{trial_id}/flights/{flight_id}/results/{version}/decisions/{plot_id}` | accept or reject a plot of the current result (`{decision, note}`), or take it back (app/review.py) |
 | GET | `/api/trials/{trial_id}/flights/{flight_id}/results/overlay` | the result's field picture (WebP) |
+| GET | `/api/trials/{trial_id}/flights/{flight_id}/map` | short-lived signed links to the viewing COG and a result's assignment raster (`?version=n`), read by the browser with Range requests |
 | GET | `/api/models` | the models a flight can be processed with |
 | PUT / DELETE | `/api/local-uploads/{session_id}` | local runs only: stands in for Cloud Storage's upload sessions |
+| GET / HEAD | `/api/local-objects/{token}` | local runs only: stands in for Cloud Storage's signed URLs (Range requests included) |
 
-Every route but `/api/health` and the local upload stand-in needs a signed-in user.
+Every route but `/api/health` and the two local stand-ins needs a signed-in user.
 
 `/docs` has the live version with schemas and a try-it-out form.
 
 ## Known limits, and what fixes them
 
 - **Downloads ≤ 32 MiB.** `GET …/files/…` streams through the API, so Cloud Run's
-  response limit applies. Larger files will get short-lived signed download URLs,
-  together with the map viewer, which takes the API out of the data path.
+  response limit applies. The map files already go to the browser through signed
+  links (`GET …/map`, docs/gcp-setup.md step 14); downloads of uploaded files can
+  move onto the same links.
 - **One account per user.** Nobody sees anyone else's trials yet. Sharing between
   accounts is a later decision; `app.auth.account_id_for` is the one place that
   decides which account a user acts for.

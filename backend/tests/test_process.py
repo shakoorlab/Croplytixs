@@ -141,6 +141,30 @@ def test_a_run_writes_a_result_version_and_points_the_flight_at_it(repo, store, 
     assert repo.list_results("flt_1")[0]["id"] == "flt_1:v1"
 
 
+def test_each_plot_says_how_to_draw_it(repo, store, tmp_path, spec, weights):
+    """The Reviewer finds a plot's canopy by its label in the assignment raster
+    and frames the picture on its box (frontend: sections/trials/reviewer/PlotView)."""
+    stored_flight(repo, store, tmp_path, spec, weights)
+    doc = process_flight("flt_1", repo, store)
+    assert doc["layers"] == {"noPlotValue": process_module.NO_PLOT, "plotBoxes": True}
+    rows = json.loads(b"".join(store.open(doc["files"]["plots"])))
+    assert sorted(r["label"] for r in rows) == list(range(1, 7))
+    first = next(r for r in rows if r["plotId"] == "1-1")
+    xs, ys = zip(*first["box"])
+    assert first["box"][0] == first["box"][-1]  # a closed ring
+    assert (min(xs), min(ys), max(xs), max(ys)) == pytest.approx((1.0, 1.0, 1.92, 1.46), abs=1e-3)  # write_grid's first box
+
+    local = tmp_path / "assignment.tif"
+    local.write_bytes(b"".join(store.open(doc["files"]["assignment"])))
+    prob_path = tmp_path / "prob.tif"
+    prob_path.write_bytes(b"".join(store.open(doc["files"]["probability"])))
+    with rasterio.open(local) as a, rasterio.open(prob_path) as p:
+        labels, prob = a.read(1), p.read(1)
+        assert a.profile["tiled"] and a.dtypes[0] == "uint16" and a.transform == p.transform
+    assert set(np.unique(labels)) <= {0, process_module.NO_PLOT, *range(1, 7)}
+    assert (prob[labels != 0] >= 128).all()  # only canopy is labelled, by a plot or as no plot's
+
+
 def test_a_rerun_is_a_new_version_and_reuses_the_canopy_map(repo, store, tmp_path, spec, weights):
     stored_flight(repo, store, tmp_path, spec, weights)
     first = process_flight("flt_1", repo, store)
@@ -152,6 +176,22 @@ def test_a_rerun_is_a_new_version_and_reuses_the_canopy_map(repo, store, tmp_pat
     assert first["files"]["csv"] != second["files"]["csv"]
     assert [r["version"] for r in repo.list_results("flt_1")] == [2, 1]
     assert repo.get_flight_unscoped("flt_1")["result"]["version"] == 2
+
+
+def test_a_rerun_keeps_the_review_decisions_and_the_pending_count(repo, store, tmp_path, spec, weights):
+    from app import review
+
+    stored_flight(repo, store, tmp_path, spec, weights)
+    first = process_flight("flt_1", repo, store)
+    rows = json.loads(b"".join(store.open(first["files"]["plots"])))
+    flight = repo.get_flight_unscoped("flt_1")
+    for row in rows[:2]:
+        repo.put_decision(review.record(None, flight=flight, plot=row, version=1, decision="rejected", note=None, by="t@example.com", at="2026-11-15T00:00:00+00:00"))
+    queue_processing(repo.get_flight_unscoped("flt_1"), repo, spec.id)
+    second = process_flight("flt_1", repo, store)
+    merged = review.merge(json.loads(b"".join(store.open(second["files"]["plots"]))), repo.list_decisions("flt_1"), 2)
+    assert [p["qc"] for p in merged[:2]] == ["rejected", "rejected"]  # same canopy map, same numbers: the decisions stand
+    assert repo.get_flight_unscoped("flt_1")["flagged"] == review.summarize(second["summary"], merged)["pending"]
 
 
 def test_a_nudged_grid_is_a_new_field(repo, store, tmp_path, spec, weights):

@@ -110,7 +110,11 @@ export function processFlight(trialId, flightId, { force = false } = {}) {
   return apiFetch(`${flightsKey(trialId)}/${flightId}/process${force ? '?force=true' : ''}`, { method: 'POST' });
 }
 
-/** Where a flight's results live. A version's results never change, so they cache for good. */
+/**
+ * Where a flight's results live. A version's numbers never change, so they cache
+ * for good; review decisions do, and api/decisions.js patches the cache when one
+ * is made here.
+ */
 export const resultsPath = (trialId, flightId, version) =>
   `${flightsKey(trialId)}/${flightId}/results${version ? `?version=${version}` : ''}`;
 

@@ -11,7 +11,8 @@ runs app/pipeline, and writes under the flight's prefix:
     results/v<n>/plots.json      per-plot numbers and QC flags
     results/v<n>/canopy.csv      the export, in the research CSV's columns first
     results/v<n>/overlay.webp    each plot's canopy in its colour, ≤ 2000 px
-    results/v<n>/assignment.tif  which plot each pixel went to (0 = nobody)
+    results/v<n>/assignment.tif  which plot each canopy pixel went to: a plot's
+                                 `label`, NO_PLOT if none, 0 where there is no canopy
     results/v<n>/run.json        inputs and their hashes, model, settings, timings
 
 then a `results` record in Firestore (summary, file keys, model, settings) and
@@ -43,6 +44,7 @@ from typing import Any
 
 import numpy as np
 
+from . import review
 from .db import Repo, utcnow
 from .model_registry import BASE_MODELS, ModelSpec, UnknownModel, resolve
 from .storage import ObjectStore
@@ -51,6 +53,7 @@ log = logging.getLogger("croplytix.process")
 
 OVERLAY_MAX_SIDE = 2000
 STRIP_ROWS = 512
+NO_PLOT = 65535  # assignment raster: canopy that reached no plot (uint16's largest value)
 
 
 class ProcessError(Exception):
@@ -344,7 +347,13 @@ def process_flight(flight_id: str, repo: Repo, store: ObjectStore, *, source_dir
             overlay = report.render_overlay(small_rgb, valid[::step, ::step], result, blank_mask, step=step)
             _put_bytes(store, files["overlay"], report.encode_image(overlay, max_side=OVERLAY_MAX_SIDE), "image/webp")
 
+            # The browser reads this a window at a time (the Reviewer draws each
+            # plot's canopy from it), so it is tiled with the index up front.
             assignment_path = work / "assignment.tif"
+            if n >= NO_PLOT:
+                raise ProcessError(f"The grid has {n} plots; a result holds at most {NO_PLOT - 1}. Split the grid.")
+            labels = result.regions.astype("uint16")
+            labels[result.canopy & (labels == 0)] = NO_PLOT
             with rasterio.open(
                 assignment_path,
                 "w",
@@ -352,7 +361,7 @@ def process_flight(flight_id: str, repo: Repo, store: ObjectStore, *, source_dir
                 height=field.height,
                 width=field.width,
                 count=1,
-                dtype="uint16" if n < 65535 else "uint32",
+                dtype="uint16",
                 crs=field.crs,
                 transform=field.transform,
                 compress="deflate",
@@ -361,7 +370,8 @@ def process_flight(flight_id: str, repo: Repo, store: ObjectStore, *, source_dir
                 blockysize=512,
                 nodata=0,
             ) as dst:
-                dst.write(result.regions.astype(dst.dtypes[0]), 1)
+                dst.write(labels, 1)
+            del labels
             _put_file(store, files["assignment"], assignment_path, "image/tiff")
 
             timings["totalSeconds"] = round(time.time() - started, 1)
@@ -414,8 +424,13 @@ def process_flight(flight_id: str, repo: Repo, store: ObjectStore, *, source_dir
             "warnings": warnings,
             "timings": timings,
             "files": files,
+            # What the browser needs to draw a plot (app/schemas.py, ResultLayers).
+            "layers": {"noPlotValue": NO_PLOT, "plotBoxes": True},
         }
         repo.create_result(doc)
+        # Decisions made on an earlier version carry over to plots this run
+        # measured the same (app/review.py), so they don't need a person again.
+        still_pending = review.summarize(summary, review.merge(rows, repo.list_decisions(flight_id), version))["pending"]
         record.update(state="complete", finishedAt=utcnow(), stage=None)
         repo.update_flight(
             flight_id,
@@ -436,7 +451,7 @@ def process_flight(flight_id: str, repo: Repo, store: ObjectStore, *, source_dir
                     "canopyCountedM2": summary["canopyCountedM2"],
                     "warnings": len(warnings),
                 },
-                "flagged": summary["pending"],
+                "flagged": still_pending,
                 "meanCover": summary["meanCover"],
                 "modelId": spec.id,
                 "model": spec.label,

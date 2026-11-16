@@ -71,6 +71,17 @@ def plot_confidence(prob: np.ndarray, valid: np.ndarray, boxes: np.ndarray, n: i
     return np.where(count > 0, total / np.maximum(count, 1), 0.0)
 
 
+def box_ring(geometry) -> list[list[float]]:
+    """A plot box's outline in the orthophoto's CRS, to the millimetre: what the
+    Reviewer draws around the plot and frames its picture on."""
+    geom = geometry
+    if geom.geom_type == "MultiPolygon":
+        geom = max(geom.geoms, key=lambda part: part.area)
+    if geom.geom_type != "Polygon":
+        geom = geom.envelope
+    return [[round(x, 3), round(y, 3)] for x, y in geom.exterior.coords]
+
+
 def plot_rows(result: Assignment, pixel_area_cm2: float, confidence: np.ndarray, *, date: str, site: str) -> list[dict]:
     """One dict per reported plot with pixels in the field, sorted by row and column."""
     rows = []
@@ -104,6 +115,8 @@ def plot_rows(result: Assignment, pixel_area_cm2: float, confidence: np.ndarray,
         rows.append(
             {
                 "plotId": plot.plot_id,
+                "label": k,  # this plot's value in the assignment raster
+                "box": box_ring(plot.geometry),
                 "file": name,
                 "row": plot.row,
                 "col": plot.col,

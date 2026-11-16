@@ -248,7 +248,7 @@ export default function TrialReview() {
                 <StatTile
                   label="Reviewed"
                   value={summary.accepted + summary.rejected}
-                  hint={`${summary.edited} corrected · ${summary.rejected} rejected`}
+                  hint={`${summary.accepted} accepted · ${summary.rejected} rejected`}
                   onClick={() => setFilter('reviewed')}
                   active={filter === 'reviewed'}
                 />
@@ -301,9 +301,13 @@ export default function TrialReview() {
               {/* ---- the plots ---- */}
               {filter === 'queue' && plots.every((plot) => !matches(plot, 'queue')) ? (
                 <Stack sx={(theme) => ({ ...NESTED_PANEL_FRAMED(theme), alignItems: 'center', gap: 1, py: 6 })}>
-                  <Typography variant="subtitle1">Nothing needs review</Typography>
+                  <Typography variant="subtitle1">
+                    {summary.flaggedTotal ? 'Every flagged plot is reviewed' : 'Nothing needs review'}
+                  </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    No plot on this flight was flagged. All plots shows every one.
+                    {summary.flaggedTotal
+                      ? 'Reviewed shows the decisions; All plots shows every plot.'
+                      : 'No plot on this flight was flagged. All plots shows every one.'}
                   </Typography>
                 </Stack>
               ) : (

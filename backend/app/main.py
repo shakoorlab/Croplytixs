@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .auth import TokenVerifier, User, current_user, get_verifier
 from .deps import get_repo, get_store
-from .routers import flights, local_uploads, models, trials
+from .routers import flights, local_objects, local_uploads, models, trials
 from .settings import settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -52,11 +52,13 @@ app.include_router(trials.router, prefix="/api", dependencies=signed_in)
 app.include_router(flights.router, prefix="/api", dependencies=signed_in)
 app.include_router(models.router, prefix="/api", dependencies=signed_in)
 
-# Local runs only: where the browser sends file bytes when there is no bucket. On
-# Cloud Run they go to Cloud Storage and this route doesn't exist. No sign-in
-# check, like Cloud Storage's own: the unguessable session id is the credential.
+# Local runs only: where the browser sends file bytes, and reads the map files,
+# when there is no bucket. On Cloud Run both go to Cloud Storage and these routes
+# don't exist. No sign-in check, like Cloud Storage's own: the unguessable
+# session id, or the signed link, is the credential.
 if settings.STORAGE_BACKEND == "local":
     app.include_router(local_uploads.router, prefix="/api")
+    app.include_router(local_objects.router, prefix="/api")
 
 
 @app.get("/api/me", tags=["auth"])

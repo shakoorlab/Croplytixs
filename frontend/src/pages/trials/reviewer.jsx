@@ -20,10 +20,13 @@ import Alert from '@mui/material/Alert';
 // project imports
 import { coverOf, plotLayers, predictedMask } from 'sections/trials/plotPixels';
 import { FLAG_LABELS, useTrialResults } from 'api/results';
-import { recordDecision } from 'api/labels';
+import { useFlightMap } from 'api/map';
+import { useDecide } from 'api/decisions';
+import formatRelative from 'utils/formatRelative';
 import PlotThumb, { EDIT_TINT } from 'sections/trials/PlotThumb';
 import QcChip from 'sections/trials/QcChip';
 import MaskCanvas from 'sections/trials/reviewer/MaskCanvas';
+import PlotView from 'sections/trials/reviewer/PlotView';
 import { maskDiff } from 'sections/trials/reviewer/maskTools';
 
 // assets
@@ -38,6 +41,8 @@ const mono = { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' };
 const NONE = [];
 const OPACITIES = [0.2, 0.4, 0.6, 0.8, 1];
 const QUEUE_LABELS = { queue: 'flagged + audit', flagged: 'flagged', audit: 'audit sample', reviewed: 'reviewed', all: 'all plots' };
+
+const DECIDED = { accepted: 'Accepted', rejected: 'Rejected' };
 
 const fmtArea = (cm2) => `${Math.round(cm2).toLocaleString('en-US').replace(/,/g, ' ')} cm²`;
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
@@ -113,10 +118,15 @@ export default function Reviewer() {
   const navigate = useNavigate();
 
   const { trial, flights, anchorId, isLoading, error } = useTrialResults(trialId);
-  // Per-plot imagery isn't served yet, so there is no plot to draw or mask to
-  // edit: the Reviewer shows each plot's numbers from the result, and accepting,
-  // rejecting and correcting wait for the imagery (and a place to store them).
+  // The plot's picture comes from the flight's map files in the bucket (PlotView,
+  // through signed links); Accept and Reject are stored by the API (api/decisions.js).
+  // Correcting the mask still runs on the old demo bundle's layers, so with none
+  // the brush stays off: corrections are the next piece.
   const bundle = null;
+  const decide = useDecide(trialId);
+  const [saveError, setSaveError] = useState(null);
+  // What this browser decided since entering, for the closing tally.
+  const [session, setSession] = useState({});
 
   const flightId = params.get('flight') || anchorId;
   const mode = params.get('queue') || 'queue';
@@ -125,6 +135,8 @@ export default function Reviewer() {
   const flight = flights.find((candidate) => candidate.id === flightId && candidate.status === 'complete' && candidate.results) || null;
   const plots = flight?.results?.plots || NONE;
   const plotsById = useMemo(() => Object.fromEntries(plots.map((plot) => [plot.plotId, plot])), [plots]);
+  const mapQuery = useFlightMap(trialId, flight?.id, flight?.results?.version);
+  const links = mapQuery.data;
 
   // ---- queue: frozen on entry so accepting a plot does not pull the rug ----
   const [queue, setQueue] = useState(null);
@@ -153,6 +165,9 @@ export default function Reviewer() {
   const [compare, setCompare] = useState(false);
 
   const current = queue && !done ? plotsById[queue[index]] : null;
+  const nextPlot = queue && !done && index < queue.length - 1 ? plotsById[queue[index + 1]] : null;
+  // Results made before plots carried their box and label can't be drawn.
+  const drawable = Boolean(links?.result?.plotBoxes && current?.box && current?.label != null);
   const layers = useMemo(() => (bundle && current ? plotLayers(bundle, current.demo) : null), [bundle, current]);
 
   const edit = useMemo(() => {
@@ -189,33 +204,31 @@ export default function Reviewer() {
     else setDone(true);
   }, [queue, index]);
 
-  const accept = useCallback(() => {
-    if (!bundle || !current || !readout) return;
-    recordDecision(trialId, flight.id, current.plotId, {
-      decision: 'accepted',
-      edited: readout.edited,
-      pixelsChanged: readout.changed,
-      coverBefore: current.cover,
-      coverAfter: readout.liveCover,
-      useForTraining,
-      grade: readout.edited ? grade : 'rough'
-    });
-    advance();
-  }, [bundle, current, readout, trialId, flight, useForTraining, grade, advance]);
-
-  const reject = useCallback(() => {
-    if (!bundle || !current) return;
-    recordDecision(trialId, flight.id, current.plotId, {
-      decision: 'rejected',
-      edited: false,
-      pixelsChanged: 0,
-      coverBefore: current.cover,
-      coverAfter: null,
-      useForTraining: false,
-      grade: null
-    });
-    advance();
-  }, [bundle, current, trialId, flight, advance]);
+  // Saved in the background: the plot shows its new status at once and the
+  // queue moves on; a failed save puts the plot back and says so.
+  const commit = useCallback(
+    (decision) => {
+      if (!current || !flight) return;
+      const plot = current;
+      setSaveError(null);
+      setSession((value) => ({ ...value, [plot.plotId]: decision }));
+      decide(flight, plot, decision).catch((err) => {
+        setSaveError(`Couldn’t save plot ${plot.plotId}: ${err.message}`);
+        setSession((value) => {
+          const next = { ...value };
+          delete next[plot.plotId];
+          return next;
+        });
+      });
+      if (decision) advance();
+    },
+    [current, flight, decide, advance]
+  );
+  const accept = useCallback(() => commit('accepted'), [commit]);
+  const reject = useCallback(() => commit('rejected'), [commit]);
+  const clearDecision = useCallback(() => {
+    if (current?.decision && !current.decision.stale) commit(null);
+  }, [current, commit]);
 
   const undo = useCallback(() => {
     if (!edit || !edit.undo.length) return;
@@ -256,6 +269,8 @@ export default function Reviewer() {
         accept();
       } else if (key === 'r' || key === 'R') {
         reject();
+      } else if (key === 'u' || key === 'U') {
+        clearDecision();
       } else if (key === 'e' || key === 'E') {
         setTool('brush');
       } else if (key === 'x' || key === 'X') {
@@ -281,18 +296,16 @@ export default function Reviewer() {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [exit, queue, index, undo, accept, reject]);
+  }, [exit, queue, index, undo, accept, reject, clearDecision]);
 
   // ---- session tally (what this browser decided since entering) ----
   const tally = useMemo(() => {
-    if (!queue) return { accepted: 0, corrected: 0, rejected: 0 };
-    const rows = queue.map((id) => plotsById[id]).filter(Boolean);
+    const decisions = Object.values(session);
     return {
-      accepted: rows.filter((plot) => plot.decision?.author === 'you' && plot.qc === 'accepted').length,
-      corrected: rows.filter((plot) => plot.decision?.author === 'you' && plot.decision?.edited).length,
-      rejected: rows.filter((plot) => plot.decision?.author === 'you' && plot.qc === 'rejected').length
+      accepted: decisions.filter((decision) => decision === 'accepted').length,
+      rejected: decisions.filter((decision) => decision === 'rejected').length
     };
-  }, [queue, plotsById]);
+  }, [session]);
 
   const previousFlight = useMemo(() => {
     if (!flight) return null;
@@ -428,6 +441,13 @@ export default function Reviewer() {
 
         {/* canvas */}
         <Stack sx={{ flex: 1, minWidth: 0, alignItems: 'center', p: 2.5, gap: 2, overflow: 'auto' }}>
+          {/* Here rather than in the panel: the panel is gone once the queue is done,
+              and the last plot's save can still fail. */}
+          {saveError && (
+            <Alert severity="error" variant="outlined" role="alert" onClose={() => setSaveError(null)} sx={{ alignSelf: 'stretch' }}>
+              {saveError}
+            </Alert>
+          )}
           {done ? (
             <Stack sx={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 1.5, textAlign: 'center' }}>
               <Box sx={{ fontSize: '2.5rem', color: 'success.main', display: 'flex' }}>
@@ -435,11 +455,11 @@ export default function Reviewer() {
               </Box>
               <Typography variant="h3">Queue complete</Typography>
               <Typography variant="body1" color="text.secondary">
-                {tally.accepted} accepted · {tally.corrected} corrected · {tally.rejected} rejected in this session
+                {tally.accepted} accepted · {tally.rejected} rejected in this session
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 420 }}>
-                Corrections you opted in are now in the label pool. The trait series for {flight.flightDate} already reflects the accepted
-                covers.
+                Saved for everyone on this trial. The trait series for {flight.flightDate} leaves out the rejected plots, and the CSV marks
+                each plot’s review.
               </Typography>
               <Stack direction="row" sx={{ gap: 1.5, mt: 1 }}>
                 <Button variant="contained" onClick={exit}>
@@ -450,114 +470,141 @@ export default function Reviewer() {
                 </Button>
               </Stack>
             </Stack>
-          ) : !bundle ? (
-            <Stack sx={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2, textAlign: 'center', maxWidth: 520 }}>
-              <Alert severity="info" variant="outlined" sx={{ textAlign: 'left' }}>
-                Plot images aren’t served yet, so this plot can’t be shown or its mask corrected here. Its numbers are on the right. To see
-                every plot’s canopy, open the field picture on the flight’s page.
-              </Alert>
-              <Button variant="outlined" color="secondary" onClick={() => navigate(`/trials/${trialId}/flights/${flight.id}`)}>
-                Open the flight’s field picture
-              </Button>
-            </Stack>
           ) : (
             <>
-              <Stack direction="row" sx={{ gap: 1.5, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
-                <Tooltip title="Hold space to see the photo without the mask">
-                  <Chip
-                    size="small"
-                    icon={<EyeOutlined />}
-                    label={showMask ? 'Overlay' : 'Original'}
-                    onClick={() => setShowMask((value) => !value)}
-                    sx={{ bgcolor: showMask ? 'primary.lighter' : 'grey.100', color: showMask ? 'primary.main' : 'text.secondary' }}
-                  />
-                </Tooltip>
-                <ToggleButtonGroup
-                  exclusive
-                  size="small"
-                  value={tool}
-                  onChange={(event, value) => value && setTool(value)}
-                  sx={{
-                    '& .MuiToggleButton-root.Mui-selected': {
-                      color: 'primary.main',
-                      bgcolor: 'primary.lighter',
-                      borderColor: 'primary.light'
-                    }
-                  }}
-                >
-                  <ToggleButton value="brush">
-                    <EditOutlined style={{ marginRight: 6 }} /> Brush <Box sx={{ ml: 0.75 }}>{<Key>E</Key>}</Box>
-                  </ToggleButton>
-                  <ToggleButton value="erase">
-                    <ClearOutlined style={{ marginRight: 6 }} /> Erase <Box sx={{ ml: 0.75 }}>{<Key>X</Key>}</Box>
-                  </ToggleButton>
-                </ToggleButtonGroup>
-                <Stack direction="row" sx={{ alignItems: 'center', gap: 1, width: 170 }}>
-                  <Typography variant="caption" color="text.secondary">
-                    Size
-                  </Typography>
-                  <Slider
-                    size="small"
-                    min={1}
-                    max={14}
-                    value={brushSize}
-                    onChange={(event, value) => setBrushSize(value)}
-                    sx={{ flex: 1 }}
-                  />
-                  <Key>[</Key>
-                  <Key>]</Key>
+              {(bundle || drawable) && (
+                <Stack direction="row" sx={{ gap: 1.5, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
+                  <Tooltip title="Hold space to see the photo without the overlay">
+                    <Chip
+                      size="small"
+                      icon={<EyeOutlined />}
+                      label={showMask ? 'Overlay' : 'Original'}
+                      onClick={() => setShowMask((value) => !value)}
+                      sx={{ bgcolor: showMask ? 'primary.lighter' : 'grey.100', color: showMask ? 'primary.main' : 'text.secondary' }}
+                    />
+                  </Tooltip>
+                  {bundle && (
+                    <>
+                      <ToggleButtonGroup
+                        exclusive
+                        size="small"
+                        value={tool}
+                        onChange={(event, value) => value && setTool(value)}
+                        sx={{
+                          '& .MuiToggleButton-root.Mui-selected': {
+                            color: 'primary.main',
+                            bgcolor: 'primary.lighter',
+                            borderColor: 'primary.light'
+                          }
+                        }}
+                      >
+                        <ToggleButton value="brush">
+                          <EditOutlined style={{ marginRight: 6 }} /> Brush <Box sx={{ ml: 0.75 }}>{<Key>E</Key>}</Box>
+                        </ToggleButton>
+                        <ToggleButton value="erase">
+                          <ClearOutlined style={{ marginRight: 6 }} /> Erase <Box sx={{ ml: 0.75 }}>{<Key>X</Key>}</Box>
+                        </ToggleButton>
+                      </ToggleButtonGroup>
+                      <Stack direction="row" sx={{ alignItems: 'center', gap: 1, width: 170 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          Size
+                        </Typography>
+                        <Slider
+                          size="small"
+                          min={1}
+                          max={14}
+                          value={brushSize}
+                          onChange={(event, value) => setBrushSize(value)}
+                          sx={{ flex: 1 }}
+                        />
+                        <Key>[</Key>
+                        <Key>]</Key>
+                      </Stack>
+                      <Button size="small" color="secondary" startIcon={<UndoOutlined />} onClick={undo} disabled={!edit?.undo.length}>
+                        Undo
+                      </Button>
+                    </>
+                  )}
+                  <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
+                      Opacity
+                    </Typography>
+                    {OPACITIES.map((value, i) => (
+                      <Box
+                        key={value}
+                        onClick={() => setOpacity(value)}
+                        sx={{
+                          ...mono,
+                          fontSize: '0.7rem',
+                          width: 22,
+                          height: 22,
+                          display: 'grid',
+                          placeItems: 'center',
+                          borderRadius: 0.5,
+                          cursor: 'pointer',
+                          border: '1px solid',
+                          borderColor: opacity === value ? 'primary.main' : 'grey.300',
+                          color: opacity === value ? 'primary.main' : 'text.secondary'
+                        }}
+                      >
+                        {i + 1}
+                      </Box>
+                    ))}
+                  </Stack>
                 </Stack>
-                <Button size="small" color="secondary" startIcon={<UndoOutlined />} onClick={undo} disabled={!edit?.undo.length}>
-                  Undo
-                </Button>
-                <Stack direction="row" sx={{ alignItems: 'center', gap: 0.5 }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ mr: 0.5 }}>
-                    Opacity
-                  </Typography>
-                  {OPACITIES.map((value, i) => (
-                    <Box
-                      key={value}
-                      onClick={() => setOpacity(value)}
-                      sx={{
-                        ...mono,
-                        fontSize: '0.7rem',
-                        width: 22,
-                        height: 22,
-                        display: 'grid',
-                        placeItems: 'center',
-                        borderRadius: 0.5,
-                        cursor: 'pointer',
-                        border: '1px solid',
-                        borderColor: opacity === value ? 'primary.main' : 'grey.300',
-                        color: opacity === value ? 'primary.main' : 'text.secondary'
-                      }}
-                    >
-                      {i + 1}
-                    </Box>
-                  ))}
-                </Stack>
-              </Stack>
-
-              {bundle && current && layers && edit && (
-                <MaskCanvas
-                  bundle={bundle}
-                  plot={current.demo}
-                  layers={layers}
-                  mask={edit.mask}
-                  version={edit.version + tick}
-                  showMask={showMask}
-                  opacity={opacity}
-                  tool={tool}
-                  brushSize={brushSize}
-                  onStrokeStart={pushUndo}
-                  onPaint={bump}
-                />
               )}
 
-              <Typography variant="caption" color="text.secondary" align="center">
-                1 px = {current?.demo?.gsdCm} cm of ground · the brush edits the mask in the GeoTIFF&apos;s own raster grid, so nothing
-                round-trips through PNG
-              </Typography>
+              {bundle ? (
+                <>
+                  {bundle && current && layers && edit && (
+                    <MaskCanvas
+                      bundle={bundle}
+                      plot={current.demo}
+                      layers={layers}
+                      mask={edit.mask}
+                      version={edit.version + tick}
+                      showMask={showMask}
+                      opacity={opacity}
+                      tool={tool}
+                      brushSize={brushSize}
+                      onStrokeStart={pushUndo}
+                      onPaint={bump}
+                    />
+                  )}
+
+                  <Typography variant="caption" color="text.secondary" align="center">
+                    1 px = {current?.demo?.gsdCm} cm of ground · the brush edits the mask in the GeoTIFF&apos;s own raster grid, so nothing
+                    round-trips through PNG
+                  </Typography>
+                </>
+              ) : drawable ? (
+                <PlotView links={links} plot={current} nextPlot={nextPlot} plots={plots} showMask={showMask} opacity={opacity} />
+              ) : (
+                <Stack sx={{ flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2, textAlign: 'center', maxWidth: 520 }}>
+                  {mapQuery.error ? (
+                    <Alert severity="error" variant="outlined" sx={{ textAlign: 'left' }}>
+                      Couldn’t get links to the map files — {mapQuery.error.message}
+                    </Alert>
+                  ) : !links ? (
+                    <>
+                      <LinearProgress sx={{ width: 200, height: 2 }} />
+                      <Typography variant="caption" color="text.secondary">
+                        Getting the map files…
+                      </Typography>
+                    </>
+                  ) : (
+                    <>
+                      <Alert severity="info" variant="outlined" sx={{ textAlign: 'left' }}>
+                        This result was made before plots could be drawn. Run it again from the flight’s page to add their pictures: it
+                        reuses the canopy map, so it takes about a minute.
+                      </Alert>
+                      <Button variant="outlined" color="secondary" onClick={() => navigate(`/trials/${trialId}/flights/${flight.id}`)}>
+                        Open the flight’s page
+                      </Button>
+                    </>
+                  )}
+                </Stack>
+              )}
             </>
           )}
         </Stack>
@@ -608,11 +655,30 @@ export default function Reviewer() {
 
             <Divider />
 
-            {!bundle ? (
-              <Typography variant="caption" color="text.secondary">
-                Accepting, rejecting and correcting plots arrive with the plot images. Use → and ← to step through the queue.
-              </Typography>
-            ) : (
+            {current.decision && (
+              <Stack sx={{ gap: 0.75, alignItems: 'flex-start' }}>
+                <Typography variant="body2" color={current.decision.stale ? 'warning.main' : 'text.secondary'}>
+                  {current.decision.stale
+                    ? `${DECIDED[current.decision.decision]} on version ${current.decision.version}; the numbers have changed since, so it needs a fresh look.`
+                    : `${DECIDED[current.decision.decision]}${current.decision.by ? ` by ${current.decision.by}` : ''} · ${
+                        current.decision.saving ? 'saving…' : formatRelative(current.decision.at)
+                      }`}
+                </Typography>
+                {!current.decision.stale && (
+                  <Button
+                    size="small"
+                    color="secondary"
+                    startIcon={<UndoOutlined />}
+                    onClick={clearDecision}
+                    disabled={current.decision.saving}
+                  >
+                    Clear decision <Box sx={{ ml: 1 }}>{<Key>U</Key>}</Box>
+                  </Button>
+                )}
+              </Stack>
+            )}
+
+            {bundle && (
               <>
                 <FormControlLabel
                   control={<Checkbox checked={useForTraining} onChange={(event) => setUseForTraining(event.target.checked)} />}
@@ -649,17 +715,21 @@ export default function Reviewer() {
                 </Typography>
 
                 <Divider />
+              </>
+            )}
 
-                <Button variant="contained" size="large" startIcon={<CheckOutlined />} onClick={accept} fullWidth>
-                  Accept <Box sx={{ ml: 1 }}>{<Key>A</Key>}</Box>
-                </Button>
-                <Button variant="outlined" color="error" startIcon={<CloseOutlined />} onClick={reject} fullWidth>
-                  Reject <Box sx={{ ml: 1 }}>{<Key>R</Key>}</Box>
-                </Button>
-                <Typography variant="caption" color="text.secondary" align="center">
-                  Accept advances automatically · reject drops the plot from this date&apos;s trait series
-                </Typography>
+            <Button variant="contained" size="large" startIcon={<CheckOutlined />} onClick={accept} fullWidth>
+              Accept <Box sx={{ ml: 1 }}>{<Key>A</Key>}</Box>
+            </Button>
+            <Button variant="outlined" color="error" startIcon={<CloseOutlined />} onClick={reject} fullWidth>
+              Reject <Box sx={{ ml: 1 }}>{<Key>R</Key>}</Box>
+            </Button>
+            <Typography variant="caption" color="text.secondary" align="center">
+              Either moves to the next plot. Rejecting leaves the plot out of the trait series and marks it in the CSV.
+            </Typography>
 
+            {bundle && (
+              <>
                 {compare && (
                   <>
                     <Divider />
@@ -710,7 +780,7 @@ export default function Reviewer() {
           bgcolor: 'background.paper'
         }}
       >
-        {(bundle ? KEYS : KEYS.filter(([key]) => key === '→ ←' || key === 'Esc')).map(([key, label]) => (
+        {KEYS.filter(([key]) => bundle || VIEW_KEYS.includes(key) || (drawable && PICTURE_KEYS.includes(key))).map(([key, label]) => (
           <Typography key={key} variant="caption" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
             <Key>{key}</Key> {label}
           </Typography>
@@ -720,13 +790,17 @@ export default function Reviewer() {
   );
 }
 
-// The keyboard contract, shown along the bottom. Without plot images only
-// stepping and exiting do anything, so only they are listed then.
+// The keyboard contract, shown along the bottom: only the keys that do something
+// now. Stepping and exiting always; the overlay keys once the plot is drawn; the
+// rest with editing.
+const VIEW_KEYS = ['→ ←', 'A', 'R', 'U', 'Esc'];
+const PICTURE_KEYS = ['space', '1–5'];
 const KEYS = [
   ['→ ←', 'next / prev'],
   ['space', 'hold original'],
   ['A', 'accept'],
   ['R', 'reject'],
+  ['U', 'clear decision'],
   ['E', 'brush'],
   ['X', 'add / erase'],
   ['[ ]', 'size'],

@@ -3,7 +3,7 @@ Object storage — where the *bytes* live.
 
 The API code never touches Google Cloud Storage directly; it talks to an
 `ObjectStore` with a handful of verbs: put, open, exists, stat, delete, and
-start_upload. Two implementations:
+start_upload, plus signed_url for reading. Two implementations:
 
   * GcsObjectStore   — the real thing. Used on Cloud Run.
   * LocalObjectStore — a folder on disk. Used in tests and for running the API
@@ -35,16 +35,33 @@ chunk, then 200 with the object. After any error the browser asks "how much do
 you have?" (`Content-Range: bytes */TOTAL`) and resumes from the answer, never
 from its own count. `LocalObjectStore.receive` speaks the same protocol, so the
 uploader is exercised end to end on a laptop and in the tests.
+
+Reads that don't pass through the API either
+--------------------------------------------
+The browser reads the map files (the viewing COG, a result's assignment raster)
+a few tiles at a time with HTTP Range requests, straight from the bucket, through
+a short-lived *signed URL* (`signed_url`): a link to one object, for reading
+only, that stops working after `ttl_seconds`. Like an upload session it is a
+credential, handed only to the signed-in user who asked and never logged.
+
+On Cloud Run the API's identity has no private key to sign with, so the library
+signs through the IAM Credentials API (`signBlob`), which needs the API's service
+account to hold Service Account Token Creator on itself (docs/gcp-setup.md, step
+14). The bucket's CORS rule lets the web app's origin read with Range requests.
+`LocalObjectStore` signs its own links to /api/local-objects, which answer Range
+requests the same way, so the browser code is the same on a laptop.
 """
 
 from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import re
 import secrets
 import shutil
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, Iterator, Protocol
@@ -77,6 +94,10 @@ class ObjectStore(Protocol):
     def start_upload(self, key: str, size: int, content_type: str | None = None, origin: str | None = None) -> str:
         """Open a resumable upload session for exactly `size` bytes at `key`; returns its URL."""
 
+    def signed_url(self, key: str, ttl_seconds: int) -> str:
+        """A link that reads this one object, Range requests included, until it expires."""
+        ...
+
     def describe(self) -> str:
         """Human-readable location, surfaced on /api/health."""
 
@@ -84,6 +105,10 @@ class ObjectStore(Protocol):
 # ---------------------------------------------------------------------------
 # local folder
 # ---------------------------------------------------------------------------
+class SigningUnavailable(Exception):
+    """The store can't sign read links with the credentials it has; the message says what to set up."""
+
+
 class UploadProtocolError(Exception):
     """A request the Cloud Storage upload protocol would refuse with a 400."""
 
@@ -108,6 +133,9 @@ class LocalObjectStore:
         # Upload sessions live next to the objects, in a folder no key can reach
         # (keys are validated to stay under root, and this name is not a key).
         self._sessions = self.root / ".sessions"
+        # Signs read links. New each process: a restart retires every link, which
+        # only costs the browser one refetch of the links.
+        self._link_key = secrets.token_bytes(32)
 
     def _path(self, key: str) -> Path:
         path = (self.root / key).resolve()
@@ -146,6 +174,29 @@ class LocalObjectStore:
 
     def describe(self) -> str:
         return f"local:{self.root}"
+
+    # -- signed read links, the way Cloud Storage's signed URLs work -----------
+    def _link_signature(self, claims: str) -> str:
+        return base64.urlsafe_b64encode(hmac.new(self._link_key, claims.encode(), hashlib.sha256).digest()).decode().rstrip("=")
+
+    def signed_url(self, key: str, ttl_seconds: int) -> str:
+        self._path(key)
+        claims = base64.urlsafe_b64encode(json.dumps({"k": key, "e": int(time.time()) + ttl_seconds}).encode()).decode().rstrip("=")
+        # Relative, like the upload sessions: the Vite proxy forwards it here.
+        return f"/api/local-objects/{claims}.{self._link_signature(claims)}"
+
+    def resolve_link(self, token: str) -> Path:
+        """The file a link from `signed_url` reads. KeyError if forged, expired or gone."""
+        claims, _, signature = token.partition(".")
+        if not signature or not hmac.compare_digest(signature, self._link_signature(claims)):
+            raise KeyError(token)
+        payload = json.loads(base64.urlsafe_b64decode(claims + "=" * (-len(claims) % 4)))
+        if payload["e"] < time.time():
+            raise KeyError(token)
+        path = self._path(payload["k"])
+        if not path.is_file():
+            raise KeyError(token)
+        return path
 
     # -- resumable uploads, the way Cloud Storage does them --------------------
     def start_upload(self, key: str, size: int, content_type: str | None = None, origin: str | None = None) -> str:
@@ -246,6 +297,7 @@ class GcsObjectStore:
         self._client = storage.Client(project=project)
         self._bucket = self._client.bucket(bucket_name)
         self.bucket_name = bucket_name
+        self._signer = None  # credentials for signing links, fetched on first use
 
     def put(self, key: str, fileobj: BinaryIO, content_type: str | None = None) -> int:
         blob = self._bucket.blob(key)
@@ -291,6 +343,39 @@ class GcsObjectStore:
         # bytes it sends itself, and the browser sends them.
         blob = self._bucket.blob(key)
         return blob.create_resumable_upload_session(content_type=content_type, size=size, origin=origin, checksum=None)
+
+    def signed_url(self, key: str, ttl_seconds: int) -> str:
+        """A V4 signed GET URL. With a service-account key (or impersonated
+        credentials) the library signs locally; with Cloud Run's metadata-server
+        identity, which has no key, it signs through IAM's signBlob as that
+        service account, which needs Token Creator on itself."""
+        from datetime import timedelta
+
+        import google.auth
+        from google.auth import credentials as ga_credentials
+        from google.auth.transport.requests import Request
+
+        if self._signer is None:
+            self._signer, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        creds = self._signer
+        options: dict = {"credentials": creds}
+        if not isinstance(creds, ga_credentials.Signing):
+            if not creds.valid:
+                creds.refresh(Request())  # also learns the service account's email on Cloud Run
+            email = getattr(creds, "service_account_email", None)
+            if not email or email == "default":
+                raise SigningUnavailable(
+                    "These credentials can't sign links to the map files. On a laptop, sign in as the API's service account: "
+                    "gcloud auth application-default login --impersonate-service-account=SA_EMAIL"
+                )
+            options = {"service_account_email": email, "access_token": creds.token}
+        try:
+            return self._bucket.blob(key).generate_signed_url(version="v4", expiration=timedelta(seconds=ttl_seconds), method="GET", **options)
+        except Exception as exc:  # permission denied, API off: say which setup step fixes it
+            raise SigningUnavailable(
+                "The API couldn't sign links to the map files. Check that the IAM Credentials API is on and that the API's "
+                f"service account has Service Account Token Creator on itself (docs/gcp-setup.md, step 14). ({type(exc).__name__})"
+            ) from exc
 
     def describe(self) -> str:
         return f"gs://{self.bucket_name}"

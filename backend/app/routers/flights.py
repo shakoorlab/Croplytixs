@@ -36,9 +36,12 @@ are blocking, and an `async def` around them would stall the event loop.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import logging
 import re
+from collections import OrderedDict
 from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath
 
@@ -52,9 +55,22 @@ from ..ids import flight_id as new_flight_id
 from ..ids import safe_filename
 from ..jobs import has_plot_grid, queue_processing, queued, start_ingest, start_processing
 from ..model_registry import UnknownModel, resolve
-from ..schemas import FileDeclaration, Flight, FlightCreate, FlightResults, FlightUploads, ProcessRequest, StoredFile, UploadTarget
+from .. import review
+from ..schemas import (
+    DecisionOutcome,
+    DecisionRequest,
+    FileDeclaration,
+    Flight,
+    FlightCreate,
+    FlightMap,
+    FlightResults,
+    FlightUploads,
+    ProcessRequest,
+    StoredFile,
+    UploadTarget,
+)
 from ..settings import settings
-from ..storage import ObjectStore
+from ..storage import ObjectStore, SigningUnavailable
 
 log = logging.getLogger("croplytix.flights")
 
@@ -440,6 +456,28 @@ def _result(flight: dict, version: int | None, repo: Repo) -> dict:
     return doc
 
 
+# A version's plots.json never changes, so a few are kept here: a reviewer's every
+# decision needs the plot it is about, and its summary recounted.
+_PLOTS: OrderedDict[tuple[str, str], list[dict]] = OrderedDict()
+_PLOTS_KEPT = 16
+
+
+def _plots(store: ObjectStore, doc: dict) -> list[dict]:
+    key = (store.describe(), doc["files"]["plots"])
+    if key not in _PLOTS:
+        _PLOTS[key] = json.loads(b"".join(store.open(doc["files"]["plots"])))
+        while len(_PLOTS) > _PLOTS_KEPT:
+            _PLOTS.popitem(last=False)
+    _PLOTS.move_to_end(key)
+    return _PLOTS[key]
+
+
+def _reviewed(doc: dict, store: ObjectStore, repo: Repo) -> tuple[list[dict], dict]:
+    """A version's plots and summary with the review decisions merged in."""
+    plots = review.merge(_plots(store, doc), repo.list_decisions(doc["flightId"]), doc["version"])
+    return plots, review.summarize(doc["summary"], plots)
+
+
 @router.get("/{flight_id}/results", response_model=FlightResults)
 def get_results(
     trial_id: str,
@@ -450,10 +488,10 @@ def get_results(
     store: ObjectStore = Depends(get_store),
 ):
     """A result version (the flight's current one by default) with every
-    plot's numbers, and the list of all versions."""
+    plot's numbers and review decision, and the list of all versions."""
     flight = _require_flight(account, trial_id, flight_id, repo)
     doc = _result(flight, version, repo)
-    plots = json.loads(b"".join(store.open(doc["files"]["plots"])))
+    plots, summary = _reviewed(doc, store, repo)
     versions = [
         {
             "version": r["version"],
@@ -467,7 +505,100 @@ def get_results(
         for r in repo.list_results(flight_id)
     ]
     public = {k: v for k, v in doc.items() if k not in ("files", "accountId", "trialKey")}
-    return {**public, "current": doc["id"] == (flight.get("result") or {}).get("id"), "plots": plots, "versions": versions}
+    current = doc["id"] == (flight.get("result") or {}).get("id")
+    return {**public, "summary": summary, "current": current, "plots": plots, "versions": versions}
+
+
+def _decide(trial_id: str, flight_id: str, version: int, plot_id: str, decision: str | None, note: str | None, user: User, account: str, repo: Repo, store: ObjectStore) -> dict:
+    flight = _require_flight(account, trial_id, flight_id, repo)
+    doc = _result(flight, version, repo)
+    current = (flight.get("result") or {}).get("version")
+    if version != current:
+        raise HTTPException(409, f"Version {version} isn't this flight's current result; review version {current}.")
+    plot = next((p for p in _plots(store, doc) if p["plotId"] == plot_id), None)
+    if plot is None:
+        raise HTTPException(404, f"No plot '{plot_id}' in version {version}.")
+    existing = repo.get_decision(review.decision_id(flight_id, plot_id))
+    repo.put_decision(review.record(existing, flight=flight, plot=plot, version=version, decision=decision, note=note, by=user.email or user.uid, at=utcnow()))
+    plots, summary = _reviewed(doc, store, repo)
+    # The flights table and the trials list count what still needs a person.
+    repo.update_flight(flight_id, {"flagged": summary["pending"]})
+    return {"plot": next(p for p in plots if p["plotId"] == plot_id), "summary": summary}
+
+
+@router.put("/{flight_id}/results/{version}/decisions/{plot_id:path}", response_model=DecisionOutcome)
+def decide_plot(
+    trial_id: str,
+    flight_id: str,
+    version: int,
+    plot_id: str,
+    body: DecisionRequest,
+    user: User = Depends(current_user),
+    account: str = Depends(current_account),
+    repo: Repo = Depends(get_repo),
+    store: ObjectStore = Depends(get_store),
+):
+    """Accept or reject a plot's measurement in the flight's current result.
+    Replaces any earlier decision on the plot (kept in its history). A rejected
+    plot leaves the trait series and is marked in the CSV (app/review.py)."""
+    return _decide(trial_id, flight_id, version, plot_id, body.decision, body.note, user, account, repo, store)
+
+
+@router.delete("/{flight_id}/results/{version}/decisions/{plot_id:path}", response_model=DecisionOutcome)
+def clear_decision(
+    trial_id: str,
+    flight_id: str,
+    version: int,
+    plot_id: str,
+    user: User = Depends(current_user),
+    account: str = Depends(current_account),
+    repo: Repo = Depends(get_repo),
+    store: ObjectStore = Depends(get_store),
+):
+    """Take a plot's decision back: it is the model's call again (flagged plots
+    need review again). The cleared decision stays in the plot's history."""
+    return _decide(trial_id, flight_id, version, plot_id, None, None, user, account, repo, store)
+
+
+@router.get("/{flight_id}/map", response_model=FlightMap)
+def get_map(
+    trial_id: str,
+    flight_id: str,
+    response: Response,
+    version: int | None = None,
+    account: str = Depends(current_account),
+    repo: Repo = Depends(get_repo),
+    store: ObjectStore = Depends(get_store),
+):
+    """Signed links to the flight's viewing COG and, once it has results, to a
+    result version's assignment raster (the current one by default). The browser
+    reads them with Range requests, straight from the bucket, which is how the
+    Reviewer draws a plot without the API in the data path. The links expire
+    after MAP_LINK_MINUTES; ask again before then."""
+    flight = _require_flight(account, trial_id, flight_id, repo)
+    ingest = flight.get("ingest") or {}
+    view = ingest.get("view") or {}
+    if ingest.get("state") != "complete" or not view.get("key"):
+        raise HTTPException(409, "The map copies aren't built yet.")
+    doc = _result(flight, version, repo) if version is not None or flight.get("result") else None
+    ttl = settings.MAP_LINK_MINUTES * 60
+    try:
+        body: dict = {"view": {"url": store.signed_url(view["key"], ttl), "bytes": view.get("bytes")}, "result": None}
+        if doc:
+            layers = doc.get("layers") or {}
+            body["result"] = {
+                "version": doc["version"],
+                "assignment": {"url": store.signed_url(doc["files"]["assignment"], ttl)},
+                "noPlotValue": layers.get("noPlotValue"),
+                "plotBoxes": bool(layers.get("plotBoxes")),
+            }
+    except SigningUnavailable as exc:
+        log.warning("map links for %s: %s", flight_id, exc)
+        raise HTTPException(503, str(exc)) from exc
+    # The links are credentials: no cache between here and the browser may keep them.
+    response.headers["Cache-Control"] = "no-store"
+    expires = datetime.now(timezone.utc) + timedelta(seconds=ttl)
+    return {**body, "expiresAt": expires.isoformat(timespec="seconds"), "expiresInSeconds": ttl}
 
 
 def _result_file(store: ObjectStore, key: str, media_type: str, filename: str, disposition: str) -> StreamingResponse:
@@ -495,10 +626,29 @@ def download_results_csv(
     repo: Repo = Depends(get_repo),
     store: ObjectStore = Depends(get_store),
 ):
-    """The result as CSV: the research pipeline's columns, then the platform's."""
+    """The result as CSV: the research pipeline's columns, then the platform's,
+    then the review: `review` (accepted, rejected, pending or passed), who and when."""
     flight = _require_flight(account, trial_id, flight_id, repo)
     doc = _result(flight, version, repo)
-    return _result_file(store, doc["files"]["csv"], "text/csv; charset=utf-8", _export_name(flight, doc["version"], ".csv"), "attachment")
+    if store.stat(doc["files"]["csv"]) is None:
+        raise HTTPException(404, "That file of the result is missing.")
+    plots, _ = _reviewed(doc, store, repo)
+    by_id = {p["plotId"]: p for p in plots}
+    reader = csv.DictReader(io.StringIO(b"".join(store.open(doc["files"]["csv"])).decode("utf-8")))
+    out = io.StringIO()
+    writer = csv.DictWriter(out, fieldnames=[*(reader.fieldnames or []), "review", "reviewed_by", "reviewed_at"], lineterminator="\n")
+    writer.writeheader()
+    for row in reader:
+        plot = by_id.get(row.get("plot_id"), {})
+        standing = plot.get("decision") if plot.get("qc") in review.DECISIONS else None
+        writer.writerow({**row, "review": plot.get("qc", ""), "reviewed_by": (standing or {}).get("by") or "", "reviewed_at": (standing or {}).get("at") or ""})
+    data = out.getvalue().encode("utf-8")
+    name = _export_name(flight, doc["version"], ".csv")
+    return Response(
+        data,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Length": str(len(data)), "Content-Disposition": f'attachment; filename="{name}"'},
+    )
 
 
 @router.get("/{flight_id}/results/overlay")

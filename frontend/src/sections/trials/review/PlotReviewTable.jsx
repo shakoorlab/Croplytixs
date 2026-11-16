@@ -44,6 +44,15 @@ export function flagEvidence(plot, flag) {
   }
 }
 
+/** Who decided a plot and when, or why an earlier decision no longer stands. */
+function reviewNote(decision) {
+  if (!decision) return '';
+  const what = decision.decision === 'accepted' ? 'Accepted' : 'Rejected';
+  if (decision.stale) return `${what} on version ${decision.version}; the numbers have changed since, so it needs a fresh look.`;
+  const when = decision.at ? new Date(decision.at).toLocaleString() : '';
+  return [what, decision.by && `by ${decision.by}`, when && `· ${when}`].filter(Boolean).join(' ');
+}
+
 // Field order: by row, then column; plots without them after, by id.
 const plotOrder = (plot) => `${String(plot.row ?? 99999).padStart(5, '0')} ${String(plot.col ?? 99999).padStart(5, '0')} ${plot.plotId}`;
 
@@ -280,7 +289,11 @@ export default function PlotReviewTable({
                   )}
                 </TableCell>
                 <TableCell align="center">
-                  <QcChip qc={plot.qc} edited={plot.decision?.edited} audit={plot.audit} />
+                  <Tooltip title={reviewNote(plot.decision)} placement="top" disableHoverListener={!plot.decision}>
+                    <span>
+                      <QcChip qc={plot.qc} edited={plot.decision?.edited} audit={plot.audit} />
+                    </span>
+                  </Tooltip>
                 </TableCell>
               </TableRow>
             );
